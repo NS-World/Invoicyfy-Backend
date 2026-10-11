@@ -145,6 +145,10 @@ function write_store(array $user, $requested): int
         return (int) $user['store_id'];
     }
     $id = ($requested === null || $requested === '') ? ($user['store_id'] ?? null) : (int) $requested;
+    if (!$id && is_admin($user)) {
+        // Admin without a home store (e.g. store field left empty on the user): use the first store.
+        $id = db_value('SELECT MIN(store_id) FROM stores');
+    }
     if (!$id) {
         fail('store_id is required');
     }
