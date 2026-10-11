@@ -24,7 +24,12 @@ if (!isset($pdo)) {
         error_log('DB connection failed: ' . $e->getMessage());
         http_response_code(500);
         header('Content-Type: application/json');
-        echo json_encode(["status" => "error", "message" => "Database connection failed"]);
+        $message = "Database connection failed";
+        if (filter_var(env('APP_DEBUG', false), FILTER_VALIDATE_BOOLEAN)) {
+            // e.g. "Access denied for user ..." (wrong DB_USER / DB_PASS) or "Unknown database ..." (wrong DB_NAME)
+            $message .= ': ' . preg_replace('/^SQLSTATE\[\w+\] \[\d+\] /', '', $e->getMessage());
+        }
+        echo json_encode(["status" => "error", "message" => $message]);
         exit;
     }
 }
