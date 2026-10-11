@@ -23,7 +23,8 @@ function customer_payload(array $d): array
         fail('Enter a valid phone number');
     }
     $stateCode = resolve_state_code(str_field($d, 'state_code'), $gstin, str_field($d, 'state'));
-    return [
+    $optIn = array_key_exists('marketing_opt_in', $d) ? ['marketing_opt_in' => bool_field($d, 'marketing_opt_in', true) ? 1 : 0] : [];
+    return $optIn + [
         'customer_type' => $type,
         'name' => $name,
         'company_name' => str_field($d, 'company_name'),

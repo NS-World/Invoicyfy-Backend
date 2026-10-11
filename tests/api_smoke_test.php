@@ -311,5 +311,70 @@ check('cannot edit own role permissions (403)', $c === 403, $r);
 check('non-admin cannot edit an Admin (403)', $c === 403, $r);
 $token = $adminToken;
 
+echo "\nAnnual report\n";
+[$c, $r] = call('GET', '/reports/annual.php');
+check('annual report for current FY', $c === 200 && count($r['monthly'] ?? []) === 12 && isset($r['totals']['sales'], $r['previous'], $r['top_products']), $r);
+check('annual months start in April', substr($r['monthly'][0]['month'] ?? '', 5) === '04', $r['monthly'][0] ?? null);
+[$c, $r] = call('GET', '/reports/annual.php?fy=1999');
+check('invalid FY rejected', $c === 400, $r);
+
+echo "\nOffers & messages\n";
+[$c, $r] = call('POST', '/master/customer/add-customer.php', ['name' => 'No Offers Please', 'phone' => '9811122233', 'marketing_opt_in' => false]);
+check('customer can opt out of offers', $c === 201, $r);
+[$c, $r] = call('POST', '/master/customer/add-customer.php', ['name' => 'Offer Fan', 'phone' => '98111 22244']);
+$fanId = $r['customer_id'] ?? 0;
+[$c, $r] = call('GET', '/master/campaign/audience.php?activity=all');
+check('audience excludes opted-out customers', $c === 200 && $r['data']['opted_out'] >= 1 && !in_array('919811122233', array_column($r['data']['sample'], 'phone'), true), $r);
+[$c, $r] = call('POST', '/master/campaign/create-campaign.php', ['name' => 'API test', 'message' => 'Hi {name}', 'channel' => 'api', 'audience' => ['activity' => 'all']]);
+check('API campaign refused until WhatsApp is set up', $c === 400, $r);
+[$c, $r] = call('POST', '/master/campaign/update-whatsapp-settings.php', ['wa_business_number' => '9825012345', 'wa_phone_number_id' => '1234567890', 'wa_access_token' => 'EAAG-test-token-1234567890', 'wa_template_name' => 'shop_offer']);
+check('save WhatsApp settings', $c === 200 && $r['data']['api_ready'] === true && $r['data']['wa_business_number'] === '919825012345', $r);
+check('access token never returned', !str_contains(json_encode($r), 'EAAG-test'), $r);
+[$c, $r] = call('POST', '/master/campaign/update-whatsapp-settings.php', ['wa_template_name' => 'Bad Name!']);
+check('invalid template name rejected', $c === 400, $r);
+[$c, $r] = call('POST', '/master/campaign/create-campaign.php', ['name' => 'Weekend offer', 'message' => 'Hi {name}, 20% off at {shop}!', 'channel' => 'manual', 'audience' => ['activity' => 'all']]);
+check('create manual campaign', $c === 201 && $r['data']['total'] >= 1, $r);
+$campaignId = $r['data']['campaign_id'] ?? 0;
+[$c, $r] = call('GET', "/master/campaign/get-campaign.php?campaign_id=$campaignId&limit=100");
+$fan = array_values(array_filter($r['recipients']['data'] ?? [], fn($x) => $x['customer_id'] === $fanId))[0] ?? null;
+check('recipient gets personalised text + normalised phone', $fan && $fan['phone'] === '919811122244' && str_starts_with($fan['text'], 'Hi Offer Fan, 20% off at'), $fan);
+[$c, $r] = call('POST', '/master/campaign/mark-sent.php', ['recipient_id' => $fan['recipient_id'] ?? 0]);
+check('mark recipient as sent', $c === 200 && $r['data']['sent'] === 1, $r);
+[$c, $r] = call('GET', '/master/campaign/campaigns.php');
+check('campaign history', $c === 200 && $r['total'] >= 1, $r);
+
+echo "\nBackup & restore\n";
+[$c, $r] = call('GET', '/master/backup/tables.php');
+check('backup table list', $c === 200 && array_column($r['data']['tables'], 'table')[0] === 'roles', $r);
+[$c, $r] = call('GET', '/master/backup/export.php?table=customers&limit=500');
+check('export customers', $c === 200 && $r['total'] >= 2 && in_array('marketing_opt_in', $r['columns'], true), $r);
+$rows = array_map(fn($x, $i) => $x + ['__row' => $i + 2], $r['data'], array_keys($r['data']));
+[$c, $r] = call('GET', '/master/backup/export.php?table=stores');
+check('store export hides WhatsApp token', !in_array('wa_access_token', $r['columns'] ?? [], true), $r['columns'] ?? $r);
+[$c, $r] = call('POST', '/master/backup/import.php', ['table' => 'customers', 'rows' => $rows]);
+check('re-importing the same data adds nothing', $c === 200 && $r['counts']['inserted'] === 0 && $r['counts']['duplicate'] === count($rows), $r);
+check('duplicates reported per row', count($r['issues']) === count($rows) && $r['issues'][0]['row'] === 2, $r['issues'][0] ?? null);
+[$c, $r] = call('POST', '/master/backup/import.php', ['table' => 'customers', 'rows' => [
+    ['__row' => 2, 'name' => 'Restored Customer', 'phone' => '9822200011', 'customer_type' => 'B2C'],
+    ['__row' => 3, 'name' => 'Same Phone', 'phone' => '9822200011'],
+    ['__row' => 4, 'customer_id' => 'abc', 'name' => 'Bad id'],
+    ['__row' => 5, 'phone' => '9822200099'],
+]]);
+check('new row added, duplicate + invalid rows reported', $r['counts'] === ['inserted' => 1, 'merged' => 0, 'duplicate' => 1, 'error' => 2], $r);
+check('error reason names the column', str_contains($r['issues'][1]['message'] ?? '', 'customer_id') && str_contains($r['issues'][2]['message'] ?? '', 'name'), $r['issues']);
+[$c, $r] = call('POST', '/master/backup/import.php', ['table' => 'payments', 'rows' => [['__row' => 2, 'invoice_id' => 999999, 'amount' => 10, 'payment_date' => '2026-04-01']]]);
+check('missing linked record explained', ($r['counts']['error'] ?? 0) === 1 && str_contains($r['issues'][0]['message'], 'invoice_id'), $r);
+[$c, $r] = call('POST', '/master/backup/import.php', ['table' => 'nope', 'rows' => []]);
+check('unknown table rejected', $c === 400, $r);
+[$c, $r] = call('POST', '/master/backup/add-log.php', ['action' => 'export', 'file_name' => 'test.xlsx', 'summary' => ['customers' => 3]]);
+check('backup logged', $c === 200, $r);
+[$c, $r] = call('POST', '/auth/signin.php', ['email' => 'counter@test.com', 'password' => 'Counter@123'], false);
+$token = $r['access_token'];
+[$c, $r] = call('GET', '/master/backup/export.php?table=users');
+check('non-admin cannot download backup (403)', $c === 403, $r);
+[$c, $r] = call('GET', '/master/campaign/campaigns.php');
+check('non-marketing role cannot see offers (403)', $c === 403, $r);
+$token = $adminToken;
+
 echo "\n$checks checks, $failures failed\n";
 exit($failures ? 1 : 0);

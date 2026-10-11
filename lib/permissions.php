@@ -17,6 +17,8 @@ const PERMISSION_MODULES = [
     'reports' => ['label' => 'Reports', 'actions' => ['view']],
     'settings' => ['label' => 'Business & Invoice Settings', 'actions' => ['view', 'edit']],
     'users' => ['label' => 'Users, Roles & Stores', 'actions' => ['view', 'add', 'edit', 'delete']],
+    'marketing' => ['label' => 'Offers & Messages', 'actions' => ['view', 'add', 'edit']],
+    'backup' => ['label' => 'Backup & Restore', 'actions' => ['view', 'add']],
 ];
 
 const DEFAULT_ROLE_PERMISSIONS = [
@@ -24,6 +26,7 @@ const DEFAULT_ROLE_PERMISSIONS = [
         'dashboard' => ['view'], 'orders' => ['view', 'add', 'edit', 'delete'], 'invoices' => ['view', 'add', 'edit', 'delete'],
         'payments' => ['view', 'add', 'delete'], 'customers' => ['view', 'add', 'edit', 'delete'], 'products' => ['view', 'add', 'edit', 'delete'],
         'inventory' => ['view', 'add'], 'expenses' => ['view', 'add', 'edit', 'delete'], 'reports' => ['view'], 'settings' => ['view', 'edit'],
+        'marketing' => ['view', 'add', 'edit'],
     ],
     'Staff' => [
         'dashboard' => ['view'], 'orders' => ['view', 'add', 'edit'], 'invoices' => ['view', 'add'], 'payments' => ['view', 'add'],
@@ -94,15 +97,16 @@ function endpoint_permission(string $script, string $method): ?array
         'order' => 'orders', 'order_items' => 'orders', 'invoice' => 'invoices', 'payment' => 'payments',
         'customer' => 'customers', 'product' => 'products', 'inventory' => 'inventory', 'expense' => 'expenses',
         'store' => 'settings', 'settings' => 'settings', 'user' => 'users', 'role' => 'users',
+        'campaign' => 'marketing', 'backup' => 'backup',
     ][$folder] ?? null;
     if (!$module) {
         return null;
     }
-    $isRead = $method === 'GET' || preg_match('/^(get|find|.*s$|categories|meta|stock|stock-movements)/', $file) && !preg_match('/^(add|create|update|delete|cancel|adjust)/', $file);
+    $isRead = $method === 'GET' || preg_match('/^(get|find|.*s$|categories|meta|stock|stock-movements)/', $file) && !preg_match('/^(add|create|update|delete|cancel|adjust|import|send|test|mark|stop)/', $file);
     if ($isRead) {
         return in_array($folder, $openReads, true) ? null : [$module, 'view'];
     }
-    if (preg_match('/^(add|create|adjust)/', $file)) {
+    if (preg_match('/^(add|create|adjust|import|send|test|mark)/', $file)) {
         $action = 'add';
     } elseif (preg_match('/^(delete|cancel)/', $file)) {
         $action = 'delete';
