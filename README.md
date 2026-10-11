@@ -21,6 +21,22 @@ php database/migrate.php --admin-email=you@shop.com --admin-password='ChangeMe12
   front-end domain. `.htaccess` blocks `lib/`, `database/`, `vendor/`, `.env` and `_*.php` on Apache;
   on nginx add equivalent `deny` rules.
 
+## Demo data (for testing)
+
+Fill a **test** database with ~3 months of realistic data for an ice-cream parlour — 20 products with
+HSN/GST, consumer and business (B2B) customers, ~900 retail bills, B2B orders with GST tax invoices
+(paid, part-paid and overdue), payments by Cash/UPI/Card/Bank, expenses, purchases, low-stock items
+and a couple of cancelled bills:
+
+```bash
+DB_NAME=invoicyfy_demo php database/migrate.php --admin-email=admin@demo.com --admin-password=Admin@1234
+DB_NAME=invoicyfy_demo php database/seed-demo.php            # --days=120 for longer history
+```
+
+Logins: your admin account, plus `biller@demo.com` (Staff) and `manager@demo.com` (Manager), password `Demo@1234`.
+The script refuses to run when the store already has invoices (use `--force` only on a test database).
+Never run it on your live database.
+
 ## Structure
 
 | Path | Purpose |
