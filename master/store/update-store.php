@@ -9,7 +9,7 @@ $id = int_field($data, 'store_id');
 if (!$id || !db_value("SELECT 1 FROM stores WHERE store_id = ?", [$id])) {
     fail('Store not found', 404);
 }
-can_edit_store($user, $id);
+assert_store_access($user, $id);
 $p = store_payload($data);
 if (db_value("SELECT 1 FROM stores WHERE name = ? AND store_id <> ? LIMIT 1", [$p['name'], $id])) {
     fail('Another store with this name already exists', 409);

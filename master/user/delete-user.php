@@ -2,11 +2,14 @@
 require_once __DIR__ . '/../../lib/bootstrap.php';
 allow_methods('PUT', 'POST', 'DELETE');
 $me = require_auth();
-require_admin($me);
 
 $id = int_field(input(), 'user_id');
 if (!$id) {
     fail('user_id is required');
+}
+$target = load_user($id);
+if ($target && is_admin($target) && !is_admin($me)) {
+    fail('Only an Admin can delete an Admin account', 403);
 }
 if ($id === (int) $me['user_id']) {
     fail('You cannot delete your own account', 409);

@@ -33,10 +33,29 @@ function product_payload(array $d, array $user): array
         'gst_rate' => $rate,
         'price_includes_tax' => bool_field($d, 'price_includes_tax') ? 1 : 0,
         'unit' => str_field($d, 'unit', 'pcs'),
+        'weight_presets' => clean_weight_presets($d['weight_presets'] ?? null),
         'track_inventory' => bool_field($d, 'track_inventory', true) ? 1 : 0,
         'low_stock_threshold' => max(0, num_field($d, 'low_stock_threshold', 0)),
         'status' => $status,
     ];
+}
+
+/** "100,250,500" (grams) -> normalised list, max 8 values. */
+function clean_weight_presets($raw): ?string
+{
+    if ($raw === null || $raw === '' || $raw === []) {
+        return null;
+    }
+    $vals = is_array($raw) ? $raw : explode(',', (string) $raw);
+    $grams = [];
+    foreach ($vals as $v) {
+        $g = (int) round((float) trim((string) $v));
+        if ($g > 0 && $g <= 100000) {
+            $grams[$g] = $g;
+        }
+    }
+    ksort($grams);
+    return $grams ? implode(',', array_slice(array_values($grams), 0, 8)) : null;
 }
 
 function product_duplicate_check(array $p, int $excludeId = 0): void

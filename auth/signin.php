@@ -11,7 +11,7 @@ if ($email === '' || $password === '') {
 }
 
 $user = db_one(
-    "SELECT u.*, r.role_name, s.name AS store_name
+    "SELECT u.*, r.role_name, r.permissions AS role_permissions, s.name AS store_name
      FROM users u
      LEFT JOIN roles r ON u.role_id = r.role_id
      LEFT JOIN stores s ON u.store_id = s.store_id

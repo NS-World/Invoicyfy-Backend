@@ -241,5 +241,75 @@ check('cannot delete customer with invoices', $c === 409, $r);
 [$c, $r] = call('PUT', '/master/product/delete-product.php', ['product_id' => $p1]);
 check('used product deactivated not deleted', $c === 200 && str_contains($r['message'], 'Inactive'), $r);
 
+echo "Weight-based billing\n";
+[$c, $r] = call('POST', '/master/product/create-product.php', ['name' => 'Loose Vanilla Ice Cream', 'price' => 400, 'unit' => 'kg', 'gst_rate' => 18, 'price_includes_tax' => true, 'weight_presets' => '1000, 100,250,500,750', 'stock_qty' => 10]);
+check('create per-kg product with gram presets', $c === 201, $r);
+$loose = $r['product_id'];
+[$c, $r] = call('GET', "/master/product/find-product.php?product_id=$loose");
+check('presets normalised (sorted grams)', ($r['data']['weight_presets'] ?? '') === '100,250,500,750,1000', $r['data'] ?? $r);
+[$c, $r] = call('POST', '/master/invoice/create-invoice.php', ['invoice_type' => 'retail', 'store_id' => $storeId, 'items' => [['product_id' => $loose, 'quantity' => 0.25], ['product_id' => $loose, 'quantity' => 0.75]]]);
+check('250 g + 750 g at Rs 400/kg = Rs 400', $c === 201 && $r['data']['total_amount'] == 400.0 && $r['data']['items'][0]['line_total'] == 100.0, $r['data'] ?? $r);
+[$c, $r] = call('GET', "/master/product/find-product.php?product_id=$loose");
+check('stock reduced by 1 kg', $r['data']['stock_qty'] == 9.0, $r['data']);
+
+echo "Invoice design & logo\n";
+$png = 'data:image/png;base64,' . base64_encode(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='));
+[$c, $r] = call('POST', '/master/store/update-invoice-settings.php', ['store_id' => $storeId, 'logo' => $png, 'invoice_settings' => [
+    'a4_template' => 'modern', 'accent_color' => '#aa3366', 'show_hsn_summary' => false, 'title_tax' => 'GST INVOICE', 'unknown_key' => 1,
+    'qr_codes' => [['label' => 'Review us on Google', 'url' => 'https://g.page/r/demo/review', 'show_on' => 'both'], ['label' => 'empty']],
+]]);
+$saved = json_decode($r['data']['invoice_settings'] ?? '{}', true);
+check('save invoice design', $c === 200 && $saved['a4_template'] === 'modern' && count($saved['qr_codes']) === 1 && !isset($saved['unknown_key']) && $r['data']['logo'] === $png, $r);
+[$c, $r] = call('POST', '/master/store/update-invoice-settings.php', ['store_id' => $storeId, 'invoice_settings' => ['accent_color' => 'red']]);
+check('bad colour rejected', $c === 400, $r);
+[$c, $r] = call('POST', '/master/store/update-invoice-settings.php', ['store_id' => $storeId, 'invoice_settings' => ['qr_codes' => [['label' => 'x', 'url' => 'javascript:alert(1)']]]]);
+check('unsafe QR link rejected', $c === 400, $r);
+[$c, $r] = call('POST', '/master/store/update-invoice-settings.php', ['store_id' => $storeId, 'logo' => 'data:image/png;base64,AAAA', 'invoice_settings' => []]);
+check('invalid logo rejected', $c === 400, $r);
+[$c, $r] = call('PUT', '/master/store/update-store.php', ['store_id' => $storeId, 'name' => "Scoopie'z Icecream", 'gstin' => '24ABCDE1234F1Z5']);
+[$c, $r] = call('GET', "/master/store/get-store-by-id.php?store_id=$storeId");
+check('business update keeps logo', $r['data']['logo'] === $png, $r['data']['logo'] ?? null);
+
+echo "Role permissions\n";
+[$c, $r] = call('GET', '/master/role/roles.php?page=1&limit=10');
+check('roles list with permission modules', $c === 200 && count($r['modules']) >= 10 && $r['data'][0]['is_system'] === true, $r);
+[$c, $r] = call('POST', '/master/role/add-role.php', ['role_name' => 'Counter Biller', 'permissions' => ['invoices' => ['add'], 'expenses' => ['view'], 'bogus' => ['view']]]);
+check('create custom role', $c === 201, $r);
+$customRole = $r['role_id'];
+[$c, $r] = call('GET', "/master/role/get-role-data-by-id.php?role_id=$customRole");
+check('view implied + unknown modules dropped', $r['data']['permissions'] === ['invoices' => ['view', 'add'], 'expenses' => ['view']], $r['data']);
+[$c, $r] = call('POST', '/master/user/create-user.php', ['name' => 'Counter One', 'email' => 'counter@test.com', 'password' => 'Counter@123', 'role_id' => $customRole, 'store_id' => $storeId]);
+$adminToken = $token;
+[$c, $r] = call('POST', '/auth/signin.php', ['email' => 'counter@test.com', 'password' => 'Counter@123'], false);
+check('login returns permissions', ($r['user']['permissions']['invoices'] ?? null) === ['view', 'add'], $r['user'] ?? $r);
+$token = $r['access_token'];
+[$c, $r] = call('POST', '/master/invoice/create-invoice.php', ['invoice_type' => 'retail', 'items' => [['product_id' => $loose, 'quantity' => 0.5]]]);
+check('custom role can bill', $c === 201, $r);
+$counterInv = $r['invoice_id'] ?? 0;
+[$c, $r] = call('POST', '/master/invoice/cancel-invoice.php', ['invoice_id' => $counterInv, 'reason' => 'x']);
+check('custom role cannot cancel (403)', $c === 403, $r);
+[$c, $r] = call('GET', '/master/expense/expenses.php');
+check('custom role can view expenses', $c === 200, $r);
+[$c, $r] = call('POST', '/master/expense/add-expense.php', ['category' => 'Rent', 'amount' => 10]);
+check('custom role cannot add expense (403)', $c === 403, $r);
+[$c, $r] = call('GET', '/reports/profit-loss.php');
+check('custom role cannot see reports (403)', $c === 403, $r);
+[$c, $r] = call('GET', '/master/order/orders.php');
+check('custom role cannot see orders (403)', $c === 403, $r);
+[$c, $r] = call('GET', '/master/product/products.php?search=Loose');
+check('billing lookups still open', $c === 200, $r);
+[$c, $r] = call('POST', '/master/store/update-invoice-settings.php', ['invoice_settings' => []]);
+check('custom role cannot change invoice design (403)', $c === 403, $r);
+$token = $adminToken;
+[$c, $r] = call('PUT', '/master/role/update-role.php', ['role_id' => $customRole, 'role_name' => 'Counter Biller', 'permissions' => ['invoices' => ['view', 'add'], 'users' => ['view', 'edit']]]);
+check('admin updates role permissions', $c === 200, $r);
+[$c, $r] = call('POST', '/auth/signin.php', ['email' => 'counter@test.com', 'password' => 'Counter@123'], false);
+$token = $r['access_token'];
+[$c, $r] = call('PUT', '/master/role/update-role.php', ['role_id' => $customRole, 'role_name' => 'Counter Biller', 'permissions' => ['reports' => ['view']]]);
+check('cannot edit own role permissions (403)', $c === 403, $r);
+[$c, $r] = call('PUT', '/master/user/update-user.php', ['user_id' => 1, 'name' => 'Admin', 'email' => 'admin@test.com', 'role_id' => 1, 'store_id' => $storeId]);
+check('non-admin cannot edit an Admin (403)', $c === 403, $r);
+$token = $adminToken;
+
 echo "\n$checks checks, $failures failed\n";
 exit($failures ? 1 : 0);

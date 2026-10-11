@@ -3,9 +3,9 @@ require_once __DIR__ . '/../../lib/bootstrap.php';
 require_once __DIR__ . '/_common.php';
 allow_methods('POST');
 $me = require_auth();
-require_admin($me);
 
 $p = user_payload(input(), true);
+guard_admin_role($me, (int) $p['role_id']);
 user_duplicate_check($p);
 $cols = array_keys($p);
 db_query(

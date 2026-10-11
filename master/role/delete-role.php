@@ -2,7 +2,6 @@
 require_once __DIR__ . '/../../lib/bootstrap.php';
 allow_methods('PUT', 'POST', 'DELETE');
 $me = require_auth();
-require_admin($me);
 
 $id = int_field(input(), 'role_id');
 $name = $id ? db_value("SELECT role_name FROM roles WHERE role_id = ?", [$id]) : null;

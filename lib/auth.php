@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../auth/jwt_config.php';
+require_once __DIR__ . '/permissions.php';
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
@@ -57,19 +58,25 @@ function public_user(array $u): array
         "role_name" => $u['role_name'] ?? null,
         "store_id" => $u['store_id'] !== null ? (int) $u['store_id'] : null,
         "store_name" => $u['store_name'] ?? null,
+        "permissions" => $u['permissions'] ?? role_permissions($u['role_name'] ?? null, $u['role_permissions'] ?? null),
     ];
 }
 
 function load_user(int $userId): ?array
 {
-    return db_one(
-        "SELECT u.user_id, u.name, u.email, u.phone, u.role_id, u.store_id, u.is_active, r.role_name, s.name AS store_name
+    $user = db_one(
+        "SELECT u.user_id, u.name, u.email, u.phone, u.role_id, u.store_id, u.is_active, r.role_name, r.permissions AS role_permissions,
+                s.name AS store_name
          FROM users u
          LEFT JOIN roles r ON u.role_id = r.role_id
          LEFT JOIN stores s ON u.store_id = s.store_id
          WHERE u.user_id = ?",
         [$userId]
     );
+    if ($user) {
+        $user['permissions'] = role_permissions($user['role_name'], $user['role_permissions']);
+    }
+    return $user;
 }
 
 /** Validates the access token and returns the current user row. Exits with 401 otherwise. */
@@ -97,6 +104,12 @@ function require_auth(): array
     }
     $user_id = (int) $user['user_id'];
     $authUser = $user;
+
+    // Role permission for this endpoint (derived from its path), e.g. master/invoice/cancel-invoice.php => invoices.delete
+    $needed = endpoint_permission((string) ($_SERVER['SCRIPT_FILENAME'] ?? ''), (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if ($needed) {
+        require_permission($user, $needed[0], $needed[1]);
+    }
     return $user;
 }
 

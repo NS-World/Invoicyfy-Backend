@@ -58,16 +58,70 @@ function store_payload(array $d): array
         'upi_id' => str_field($d, 'upi_id'),
         'invoice_terms' => str_field($d, 'invoice_terms'),
         'receipt_footer' => str_field($d, 'receipt_footer'),
-    ];
+    ] + (array_key_exists('logo', $d) ? ['logo' => clean_image_data($d['logo'], 500 * 1024, 'Logo')] : []);
 }
 
-function can_edit_store(array $user, int $storeId): void
+/** Accepts a small image as a data URI (the app resizes logos before upload). */
+function clean_image_data(?string $data, int $maxBytes, string $what): ?string
 {
-    if (is_admin($user)) {
-        return;
+    if ($data === null || $data === '') {
+        return null;
     }
-    if (strcasecmp((string) $user['role_name'], 'Manager') === 0 && (int) $user['store_id'] === $storeId) {
-        return;
+    if (!preg_match('#^data:image/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)$#', $data, $m)) {
+        fail("$what must be a PNG, JPG or WEBP image");
     }
-    fail('You are not allowed to edit this store', 403);
+    $bytes = base64_decode($m[2], true);
+    if ($bytes === false || strlen($bytes) > $maxBytes) {
+        fail("$what is too large (max " . round($maxBytes / 1024) . " KB)");
+    }
+    if (@getimagesizefromstring($bytes) === false) {
+        fail("$what is not a valid image");
+    }
+    return $data;
+}
+
+const INVOICE_SETTING_BOOLS = [
+    'show_logo', 'show_status', 'show_hsn_column', 'show_discount_column', 'show_hsn_summary', 'show_amount_in_words',
+    'show_bank', 'show_upi_qr', 'show_terms', 'show_signature', 'show_customer_phone', 'show_fssai', 'show_item_notes',
+    'show_cashier', 'show_payment_mode', 'show_gstin_on_receipt', 'show_tax_on_receipt', 'show_address_on_receipt',
+];
+const INVOICE_SETTING_TEXTS = [
+    'a4_template' => 20, 'receipt_template' => 20, 'accent_color' => 7, 'title_tax' => 40, 'title_retail' => 40,
+    'header_note' => 200, 'footer_note' => 200, 'signature_label' => 60, 'receipt_header_note' => 120, 'receipt_footer_note' => 200,
+];
+
+function clean_invoice_settings($raw): array
+{
+    if (!is_array($raw)) {
+        fail('Invalid invoice settings');
+    }
+    $out = [];
+    foreach (INVOICE_SETTING_BOOLS as $k) {
+        if (array_key_exists($k, $raw)) {
+            $out[$k] = (bool) $raw[$k];
+        }
+    }
+    foreach (INVOICE_SETTING_TEXTS as $k => $max) {
+        if (array_key_exists($k, $raw) && $raw[$k] !== null) {
+            $out[$k] = mb_substr(trim((string) $raw[$k]), 0, $max);
+        }
+    }
+    if (isset($out['accent_color']) && !preg_match('/^#[0-9a-fA-F]{6}$/', $out['accent_color'])) {
+        fail('Accent colour must look like #045864');
+    }
+    $out['qr_codes'] = [];
+    foreach (array_slice((array) ($raw['qr_codes'] ?? []), 0, 4) as $i => $q) {
+        $label = mb_substr(trim((string) ($q['label'] ?? '')), 0, 40);
+        $url = trim((string) ($q['url'] ?? ''));
+        $image = clean_image_data($q['image'] ?? null, 300 * 1024, 'QR image ' . ($i + 1));
+        if ($url !== '' && !preg_match('#^(https?://|upi://|mailto:|tel:)#i', $url)) {
+            fail('QR link ' . ($i + 1) . ' must start with https://, upi://, mailto: or tel:');
+        }
+        if ($url === '' && !$image) {
+            continue;
+        }
+        $show = in_array($q['show_on'] ?? 'both', ['both', 'a4', 'receipt'], true) ? $q['show_on'] : 'both';
+        $out['qr_codes'][] = ['label' => $label, 'url' => mb_substr($url, 0, 500), 'image' => $image, 'show_on' => $show];
+    }
+    return $out;
 }

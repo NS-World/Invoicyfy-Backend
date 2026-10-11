@@ -13,6 +13,8 @@ if (PHP_SAPI !== 'cli') {
 }
 
 require_once __DIR__ . '/../lib/env.php';
+const DEFAULT_STAFF_PERMISSIONS = ['dashboard' => ['view'], 'orders' => ['view', 'add', 'edit'], 'invoices' => ['view', 'add'],
+    'payments' => ['view', 'add'], 'customers' => ['view', 'add', 'edit'], 'products' => ['view'], 'inventory' => ['view']];
 
 $opts = getopt('', ['admin-email::', 'admin-password::', 'admin-name::']);
 $schema = require __DIR__ . '/schema.php';
@@ -173,6 +175,9 @@ foreach ($uniquesPending as $table => $uniques) {
         }
     }
 }
+
+// Old databases used a "User" role; give it the Staff defaults instead of no access.
+$pdo->exec("UPDATE roles SET permissions = '" . json_encode(DEFAULT_STAFF_PERMISSIONS) . "' WHERE role_name = 'User' AND permissions IS NULL");
 
 /* ---------------- Seed defaults ---------------- */
 if (!(int) $pdo->query("SELECT COUNT(*) FROM roles")->fetchColumn()) {

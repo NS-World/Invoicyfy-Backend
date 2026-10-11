@@ -36,6 +36,26 @@ function user_payload(array $d, bool $creating): array
     return $p;
 }
 
+/** Only an Admin may create, edit or assign the Admin role (prevents privilege escalation). */
+function guard_admin_role(array $me, int $roleId, ?int $targetUserId = null): void
+{
+    if (is_admin($me)) {
+        return;
+    }
+    if (strcasecmp((string) db_value("SELECT role_name FROM roles WHERE role_id = ?", [$roleId]), 'Admin') === 0) {
+        fail('Only an Admin can give someone the Admin role', 403);
+    }
+    if ($targetUserId) {
+        $target = load_user($targetUserId);
+        if ($target && is_admin($target)) {
+            fail('Only an Admin can change an Admin account', 403);
+        }
+        if ($targetUserId === (int) $me['user_id']) {
+            fail('You cannot change your own account here. Use Settings > Change password.', 403);
+        }
+    }
+}
+
 function user_duplicate_check(array $p, int $excludeId = 0): void
 {
     if (db_value("SELECT 1 FROM users WHERE email = ? AND user_id <> ? LIMIT 1", [$p['email'], $excludeId])) {

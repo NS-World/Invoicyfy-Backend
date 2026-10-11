@@ -99,6 +99,10 @@ $catalog = [
     ['Dry Fruits Topping', 'Add-ons', 50, 22, 5, 1, '0813', 'pcs', 300, 50],
     ['Chocolate Sauce Topping', 'Add-ons', 30, 9, 18, 1, '1806', 'pcs', 300, 50],
     ['Party Cups (pack of 50)', 'Packaging', 120, 70, 18, 0, '4823', 'pack', 25, 10],
+    // Loose ice cream sold by weight: price is per kg, billed in grams.
+    ['Loose Vanilla Ice Cream', 'Loose (per kg)', 400, 180, 18, 1, '2105', 'kg', 40, 5],
+    ['Loose Chocolate Ice Cream', 'Loose (per kg)', 480, 210, 18, 1, '2105', 'kg', 40, 5],
+    ['Loose Kesar Pista Ice Cream', 'Loose (per kg)', 600, 270, 18, 1, '2105', 'kg', 30, 5],
 ];
 $products = [];
 $admin = $users[0];
@@ -108,7 +112,7 @@ foreach ($catalog as [$name, $cat, $price, $cost, $gst, $incl, $hsn, $unit, $sto
         $pdo->beginTransaction();
         $id = insert_row('products', ['store_id' => $storeId, 'name' => $name, 'category' => $cat, 'price' => $price, 'cost_price' => $cost,
             'gst_rate' => $gst, 'price_includes_tax' => $incl, 'hsn_code' => $hsn, 'unit' => $unit, 'track_inventory' => 1,
-            'low_stock_threshold' => $reorder, 'status' => 'Active', 'sku' => 'SZ' . str_pad((string) (count($products) + 1), 3, '0', STR_PAD_LEFT)]);
+            'low_stock_threshold' => $reorder, 'status' => 'Active', 'weight_presets' => $unit === 'kg' ? '100,250,500,750,1000' : null, 'sku' => 'SZ' . str_pad((string) (count($products) + 1), 3, '0', STR_PAD_LEFT)]);
         move_stock((int) $id, $stock, 'opening', null, null, 'Opening stock (demo)', (int) $admin['user_id']);
         $pdo->commit();
     }
@@ -149,7 +153,7 @@ $methods = ['Cash', 'Cash', 'UPI', 'UPI', 'UPI', 'Card'];
 $counts = ['retail' => 0, 'tax' => 0, 'orders' => 0, 'cancelled' => 0];
 
 $restock = function (array $p, string $date) use ($admin, $storeId) {
-    $qty = max(50, (float) $p['low_stock_threshold'] * 6);
+    $qty = $p['unit'] === 'kg' ? 20 : max(50, (float) $p['low_stock_threshold'] * 6);
     move_stock((int) $p['product_id'], $qty, 'purchase', 'manual', null, 'Restock (demo)', (int) $admin['user_id']);
     insert_row('expenses', ['store_id' => $storeId, 'user_id' => $admin['user_id'], 'expense_date' => $date, 'category' => 'Purchase / Raw Material',
         'description' => "Stock purchase: {$p['name']} x $qty", 'vendor' => 'Havmor Distributors', 'amount' => round($qty * $p['cost_price'], 2),
@@ -166,7 +170,8 @@ for ($d = $days; $d >= 0; $d--) {
         $items = [];
         foreach ((array) array_rand($retailProducts, mt_rand(1, 3)) as $i) {
             $p = $retailProducts[$i];
-            $items[] = ['product_id' => $p['product_id'], 'quantity' => mt_rand(1, 3), 'item_note' => pick_one($notes)];
+            $qty = $p['unit'] === 'kg' ? pick_one([0.1, 0.25, 0.25, 0.5, 0.5, 0.75, 1]) : mt_rand(1, 3);
+            $items[] = ['product_id' => $p['product_id'], 'quantity' => $qty, 'item_note' => $p['unit'] === 'kg' ? null : pick_one($notes)];
         }
         $walkIn = mt_rand(1, 3) === 1;
         $d0 = ['customer_id' => $walkIn ? null : pick_one($customers['b2c'])];
@@ -177,7 +182,7 @@ for ($d = $days; $d >= 0; $d--) {
         [$lines, $totals] = gst_calculate(prepare_items($items), (bool) $party['is_interstate']);
         foreach ($lines as $l) {
             $p = db_one("SELECT * FROM products WHERE product_id = ?", [$l['product_id']]);
-            if ((float) $p['stock_qty'] < 10) {
+            if ((float) $p['stock_qty'] < ($p['unit'] === 'kg' ? 3 : 10)) {
                 $restock($p, $date);
             }
         }
@@ -197,8 +202,9 @@ for ($d = $days; $d >= 0; $d--) {
         $custId = pick_one($customers['b2b']);
         $items = [];
         foreach ((array) array_rand($bulkProducts, mt_rand(1, 3)) as $i) {
-            $items[] = ['product_id' => $bulkProducts[$i]['product_id'], 'quantity' => mt_rand(2, 8),
-                        'discount_amount' => mt_rand(0, 1) ? 0 : mt_rand(1, 5) * 50];
+            $q = mt_rand(2, 8);
+            $items[] = ['product_id' => $bulkProducts[$i]['product_id'], 'quantity' => $q,
+                        'discount_amount' => mt_rand(0, 1) ? 0 : round($q * $bulkProducts[$i]['price'] * mt_rand(2, 10) / 100)];
         }
         if (mt_rand(0, 1)) {
             $items[] = ['product_name' => 'Delivery charges', 'quantity' => 1, 'unit_price' => 200, 'gst_rate' => 18, 'hsn_code' => '996813'];
