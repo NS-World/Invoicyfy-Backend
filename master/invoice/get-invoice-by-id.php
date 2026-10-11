@@ -1,29 +1,12 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('GET');
+$user = require_auth();
 
-$invoice_id = isset($_GET['invoice_id']) ? intval($_GET['invoice_id']) : 0;
-
-if (!$invoice_id) {
-    echo json_encode(["status" => "error", "message" => "Invoice ID is required."]);
-    exit;
+$id = int_field($_GET, 'invoice_id');
+$invoice = $id ? load_invoice($id) : null;
+if (!$invoice) {
+    fail('Invoice not found', 404);
 }
-
-$sql = "SELECT i.*, c.name AS customer_name, u.name AS user_name, s.name AS store_name
-        FROM invoices i
-        JOIN customers c ON i.customer_id = c.customer_id
-        JOIN users u ON i.user_id = u.user_id
-        JOIN stores s ON i.store_id = s.store_id
-        WHERE i.invoice_id = ?";
-
-$stmt = $pdo->prepare($sql);
-$stmt->execute([$invoice_id]);
-$data = $stmt->fetch(PDO::FETCH_ASSOC);
-
-if ($data) {
-    echo json_encode(["status" => "success", "data" => $data]);
-} else {
-    echo json_encode(["status" => "error", "message" => "Invoice not found."]);
-}
-?>
+assert_store_access($user, $invoice['store_id']);
+json_out(["status" => "success", "data" => $invoice]);

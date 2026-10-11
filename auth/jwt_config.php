@@ -1,14 +1,18 @@
 <?php
-$accessKey = getenv('JWT_ACCESS_SECRET');
-$refreshKey = getenv('JWT_REFRESH_SECRET');
+require_once __DIR__ . '/../lib/env.php';
 
-if ($accessKey === false || $accessKey === '' || $refreshKey === false || $refreshKey === '') {
-    throw new RuntimeException('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be configured.');
+$accessKey = (string) env('JWT_ACCESS_SECRET', '');
+$refreshKey = (string) env('JWT_REFRESH_SECRET', '');
+
+if ($accessKey === '' || $refreshKey === '') {
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode(["status" => "error", "message" => "Server is not configured (JWT secrets missing)"]);
+    exit;
 }
 
 $key = $accessKey;
-$issuer = "yourdomain.com";
-$audience = "yourdomain.com";
-$access_token_exp = 9000; // 15 minutes
-$refresh_token_exp = 604800; // 7 days
-$issued_at = time();
+$jwt_issuer = "Invoicify";
+$jwt_audience = "Invoices Made Easy";
+$access_token_exp = (int) env('JWT_ACCESS_TTL', 900);     // 15 minutes
+$refresh_token_exp = (int) env('JWT_REFRESH_TTL', 604800); // 7 days

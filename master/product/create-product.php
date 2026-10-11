@@ -1,70 +1,24 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/_common.php';
+allow_methods('POST');
+$user = require_auth();
 
-header('Content-Type: application/json');
+$data = input();
+$p = product_payload($data, $user);
+product_duplicate_check($p);
+$opening = max(0, num_field($data, 'stock_qty', 0) ?? 0);
 
-$data = json_decode(file_get_contents("php://input"), true);
-
-if (!isset($data['store_id'], $data['name'], $data['price'], $data['unit'])) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "Missing required fields"]);
-    exit;
+$pdo->beginTransaction();
+$cols = array_keys($p);
+db_query(
+    "INSERT INTO products (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")",
+    array_values($p)
+);
+$id = (int) $pdo->lastInsertId();
+if ($opening > 0) {
+    move_stock($id, $opening, 'opening', null, null, 'Opening stock', (int) $user['user_id']);
 }
+$pdo->commit();
 
-$sku = $data['sku'] ?? null;
-$status = $data['status'] ?? 'Active';
-
-/* ===== Duplicate Name Check ===== */
-$checkStmt = $pdo->prepare("
-    SELECT * FROM products 
-    WHERE store_id = ? AND name = ?
-");
-$checkStmt->execute([$data['store_id'], $data['name']]);
-
-if ($checkStmt->rowCount() > 0) {
-    http_response_code(409);
-    echo json_encode(["status" => "error", "message" => "Product already exists in this store"]);
-    exit;
-}
-
-/* ===== Duplicate SKU Check (Optional but Recommended) ===== */
-if ($sku) {
-    $skuCheck = $pdo->prepare("SELECT * FROM products WHERE sku = ?");
-    $skuCheck->execute([$sku]);
-
-    if ($skuCheck->rowCount() > 0) {
-        http_response_code(409);
-        echo json_encode(["status" => "error", "message" => "SKU already exists"]);
-        exit;
-    }
-}
-
-try {
-    $stmt = $pdo->prepare("
-        INSERT INTO products 
-        (store_id, name, sku, description, price, unit, status) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ");
-
-    $stmt->execute([
-        $data['store_id'],
-        $data['name'],
-        $sku,
-        $data['description'] ?? null,
-        $data['price'],
-        $data['unit'],
-        $status
-    ]);
-
-    echo json_encode([
-        "status" => "success",
-        "message" => "Product created successfully",
-        "product_id" => $pdo->lastInsertId()
-    ]);
-
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-}
+json_out(["status" => "success", "message" => "Product created successfully", "product_id" => $id], 201);

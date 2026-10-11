@@ -1,46 +1,17 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/_common.php';
+allow_methods('POST');
+$user = require_auth();
+require_admin($user);
 
-header('Content-Type: application/json');
-$data = json_decode(file_get_contents("php://input"), true);
-
-// Validation
-if (
-    empty($data['name']) ||
-    empty($data['address']) ||
-    empty($data['phone'])
-) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "All fields are required"]);
-    exit;
+$p = store_payload(input());
+if (db_value("SELECT 1 FROM stores WHERE name = ? LIMIT 1", [$p['name']])) {
+    fail('Store with this name already exists', 409);
 }
-
-try {
-    // Check for duplicate
-    $check = $pdo->prepare("SELECT COUNT(*) FROM stores WHERE name = ?");
-    $check->execute([$data['name']]);
-    if ($check->fetchColumn() > 0) {
-        http_response_code(409);
-        echo json_encode(["status" => "error", "message" => "Store with this name already exists"]);
-        exit;
-    }
-
-    $stmt = $pdo->prepare("INSERT INTO stores (name, address, phone, logo_url) VALUES (?, ?, ?, ?)");
-    $stmt->execute([
-        $data['name'],
-        $data['address'],
-        $data['phone'],
-        $data['logo_url'] ?? null
-    ]);
-
-    echo json_encode([
-        "status" => "success",
-        "message" => "Store added successfully",
-        "store_id" => $pdo->lastInsertId()
-    ]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-}
+$cols = array_keys($p);
+db_query(
+    "INSERT INTO stores (" . implode(',', $cols) . ") VALUES (" . implode(',', array_fill(0, count($cols), '?')) . ")",
+    array_values($p)
+);
+json_out(["status" => "success", "message" => "Store added successfully", "store_id" => (int) $pdo->lastInsertId()], 201);

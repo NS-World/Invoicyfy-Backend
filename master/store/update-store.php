@@ -1,60 +1,19 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/_common.php';
+allow_methods('PUT', 'POST');
+$user = require_auth();
 
-header('Content-Type: application/json');
-$data = json_decode(file_get_contents("php://input"), true);
-
-if (
-    empty($data['store_id']) ||
-    empty($data['name']) ||
-    empty($data['address']) ||
-    empty($data['phone']) ||
-    !isset($data['logo_url'])
-) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "All fields including store_id are required"]);
-    exit;
+$data = input();
+$id = int_field($data, 'store_id');
+if (!$id || !db_value("SELECT 1 FROM stores WHERE store_id = ?", [$id])) {
+    fail('Store not found', 404);
 }
-
-try {
-    // Check for duplicate store name
-    $dup = $pdo->prepare("SELECT COUNT(*) FROM stores WHERE name = ? AND store_id != ?");
-    $dup->execute([$data['name'], $data['store_id']]);
-    if ($dup->fetchColumn() > 0) {
-        http_response_code(409);
-        echo json_encode(["status" => "error", "message" => "Another store with this name already exists"]);
-        exit;
-    }
-
-    // Check if data is unchanged
-    $check = $pdo->prepare("SELECT * FROM stores WHERE store_id = ?");
-    $check->execute([$data['store_id']]);
-    $existing = $check->fetch(PDO::FETCH_ASSOC);
-
-    if (
-        $existing &&
-        $existing['name'] === $data['name'] &&
-        $existing['address'] === $data['address'] &&
-        $existing['phone'] === $data['phone'] &&
-        $existing['logo_url'] === $data['logo_url']
-    ) {
-        echo json_encode(["status" => "warning", "message" => "No changes detected"]);
-        exit;
-    }
-
-    $stmt = $pdo->prepare("UPDATE stores SET name = ?, address = ?, phone = ?, logo_url = ? WHERE store_id = ?");
-    $stmt->execute([
-        $data['name'],
-        $data['address'],
-        $data['phone'],
-        $data['logo_url'],
-        $data['store_id']
-    ]);
-
-    echo json_encode(["status" => "success", "message" => "Store updated successfully"]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+can_edit_store($user, $id);
+$p = store_payload($data);
+if (db_value("SELECT 1 FROM stores WHERE name = ? AND store_id <> ? LIMIT 1", [$p['name'], $id])) {
+    fail('Another store with this name already exists', 409);
 }
+$set = implode(', ', array_map(fn($c) => "$c = ?", array_keys($p)));
+db_query("UPDATE stores SET $set WHERE store_id = ?", array_merge(array_values($p), [$id]));
+json_out(["status" => "success", "message" => "Store updated successfully"]);

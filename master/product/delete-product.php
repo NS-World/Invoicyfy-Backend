@@ -1,27 +1,22 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('PUT', 'POST', 'DELETE');
+$user = require_auth();
 
-header('Content-Type: application/json');
-$data = json_decode(file_get_contents("php://input"), true);
-
-if (!isset($data['product_id'])) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "product_id is required"]);
-    exit;
+$id = int_field(input(), 'product_id');
+$product = $id ? db_one("SELECT * FROM products WHERE product_id = ?", [$id]) : null;
+if (!$product) {
+    fail('Product not found', 404);
 }
-
-try {
-    $stmt = $pdo->prepare("DELETE FROM products WHERE product_id = ?");
-    $stmt->execute([$data['product_id']]);
-
-    if ($stmt->rowCount() > 0) {
-        echo json_encode(["status" => "success", "message" => "Product deleted successfully"]);
-    } else {
-        echo json_encode(["status" => "error", "message" => "Product not found"]);
-    }
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+if ($product['store_id'] !== null) {
+    assert_store_access($user, $product['store_id']);
 }
+$used = db_value("SELECT 1 FROM invoice_items WHERE product_id = ? LIMIT 1", [$id])
+    || db_value("SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1", [$id]);
+if ($used) {
+    // Keep history intact: deactivate instead of deleting.
+    db_query("UPDATE products SET status = 'Inactive' WHERE product_id = ?", [$id]);
+    json_out(["status" => "success", "message" => "Product is used in bills, so it was marked Inactive instead of deleted"]);
+}
+db_query("DELETE FROM products WHERE product_id = ?", [$id]);
+json_out(["status" => "success", "message" => "Product deleted successfully"]);

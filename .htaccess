@@ -1,0 +1,16 @@
+# Apache / XAMPP hardening for the API folder.
+Options -Indexes
+
+# Pass the Authorization header through to PHP (needed on many Apache/CGI setups).
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+    RewriteRule ^(vendor|lib|database|storage)/ - [F,L]
+</IfModule>
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+# Never serve secrets, internals or helper includes.
+<FilesMatch "^(\.env.*|composer\.(json|lock)|.*\.md|_.*\.php)$">
+    Require all denied
+</FilesMatch>

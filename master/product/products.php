@@ -1,93 +1,40 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/_common.php';
+allow_methods('GET');
+$user = require_auth();
 
-header('Content-Type: application/json');
-
-$page = isset($_GET['page']) ? (int) $_GET['page'] : 1;
-$limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 10;
-$search = isset($_GET['search']) ? '%' . $_GET['search'] . '%' : '%%';
-
-$offset = ($page - 1) * $limit;
-
-try {
-
-    // ✅ COUNT QUERY
-    $countStmt = $pdo->prepare("
-        SELECT COUNT(*) as total
-        FROM products p
-        LEFT JOIN stores s ON p.store_id = s.store_id
-        WHERE 
-            p.name LIKE ?
-            OR p.sku LIKE ?
-            OR p.description LIKE ?
-            OR p.price LIKE ?
-            OR p.unit LIKE ?
-            OR p.status LIKE ?
-            OR s.name LIKE ?
-            OR p.product_id LIKE ?
-    ");
-
-    $countStmt->execute([
-        $search,
-        $search,
-        $search,
-        $search,
-        $search,
-        $search,
-        $search,
-        $search
-    ]);
-    $total = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
-
-
-    // ✅ MAIN QUERY
-    $stmt = $pdo->prepare("
-        SELECT p.*, s.name AS store_name
-        FROM products p
-        LEFT JOIN stores s ON p.store_id = s.store_id
-        WHERE 
-            p.name LIKE ?
-            OR p.sku LIKE ?
-            OR p.description LIKE ?
-            OR p.price LIKE ?
-            OR p.unit LIKE ?
-            OR p.status LIKE ?
-            OR s.name LIKE ?
-            OR p.product_id LIKE ?
-        ORDER BY p.product_id DESC
-        LIMIT ? OFFSET ?
-    ");
-
-    $stmt->bindValue(1, $search);
-    $stmt->bindValue(2, $search);
-    $stmt->bindValue(3, $search);
-    $stmt->bindValue(4, $search);
-    $stmt->bindValue(5, $search);
-    $stmt->bindValue(6, $search);
-    $stmt->bindValue(7, $search);
-    $stmt->bindValue(8, $search);
-    $stmt->bindValue(9, $limit, PDO::PARAM_INT);
-    $stmt->bindValue(10, $offset, PDO::PARAM_INT);
-
-
-    $stmt->execute();
-
-    $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    echo json_encode([
-        "status" => "success",
-        "page" => $page,
-        "limit" => $limit,
-        "total" => $total,
-        "data" => $products
-    ]);
-
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        "status" => "error",
-        "message" => $e->getMessage()
-    ]);
+[$page, $limit, $offset, $search] = pagination();
+$where = '1=1';
+$params = [];
+$store = scope_store($user, $_GET['store_id'] ?? null);
+if ($store !== null) {
+    $where .= ' AND (p.store_id = ? OR p.store_id IS NULL)';
+    $params[] = $store;
 }
+if ($search !== '') {
+    $like = "%$search%";
+    $where .= ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.category LIKE ? OR p.hsn_code LIKE ? OR p.description LIKE ?)';
+    array_push($params, $like, $like, $like, $like, $like);
+}
+if (!empty($_GET['status'])) {
+    $where .= ' AND p.status = ?';
+    $params[] = $_GET['status'];
+}
+if (!empty($_GET['category'])) {
+    $where .= ' AND p.category = ?';
+    $params[] = $_GET['category'];
+}
+if (!empty($_GET['low_stock'])) {
+    $where .= ' AND p.track_inventory = 1 AND p.stock_qty <= p.low_stock_threshold';
+}
+
+$total = (int) db_value("SELECT COUNT(*) FROM products p WHERE $where", $params);
+$rows = db_all(
+    "SELECT p.*, s.name AS store_name FROM products p LEFT JOIN stores s ON p.store_id = s.store_id
+     WHERE $where ORDER BY p.product_id DESC LIMIT ? OFFSET ?",
+    array_merge($params, [$limit, $offset])
+);
+$rows = array_map(fn($r) => cast_numbers($r, PRODUCT_FLOATS, PRODUCT_INTS), $rows);
+
+json_out(["status" => "success", "page" => $page, "limit" => $limit, "total" => $total, "data" => $rows]);

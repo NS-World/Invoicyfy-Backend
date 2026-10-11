@@ -1,52 +1,17 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/_common.php';
+allow_methods('PUT', 'POST');
+require_auth();
 
-header('Content-Type: application/json');
-$data = json_decode(file_get_contents("php://input"), true);
-
-$customer_id = $data['customer_id'] ?? null;
-$name = trim($data['name'] ?? '');
-$phone = trim($data['phone'] ?? '');
-$email = trim($data['email'] ?? '');
-$address = trim($data['address'] ?? '');
-
-if (!$customer_id || !$name || !$phone || !$email || !$address) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "All fields including customer_id are required and must not be empty"]);
-    exit;
+$data = input();
+$id = int_field($data, 'customer_id');
+if (!$id || !db_value("SELECT 1 FROM customers WHERE customer_id = ?", [$id])) {
+    fail('Customer not found', 404);
 }
+$p = customer_payload($data);
+customer_duplicate_check($p, $id);
 
-try {
-    // Check if customer exists
-    $check = $pdo->prepare("SELECT * FROM customers WHERE customer_id = ?");
-    $check->execute([$customer_id]);
-    $existing = $check->fetch(PDO::FETCH_ASSOC);
-
-    if (!$existing) {
-        http_response_code(404);
-        echo json_encode(["status" => "error", "message" => "Customer not found"]);
-        exit;
-    }
-
-    // Check if any data actually changed
-    if (
-        $name === $existing['name'] &&
-        $phone === $existing['phone'] &&
-        $email === $existing['email'] &&
-        $address === $existing['address']
-    ) {
-        echo json_encode(["status" => "warning", "message" => "No changes detected; data is already up to date"]);
-        exit;
-    }
-
-    // Update customer
-    $stmt = $pdo->prepare("UPDATE customers SET name = ?, phone = ?, email = ?, address = ? WHERE customer_id = ?");
-    $stmt->execute([$name, $phone, $email, $address, $customer_id]);
-
-    echo json_encode(["status" => "success", "message" => "Customer updated successfully"]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-}
+$set = implode(', ', array_map(fn($c) => "$c = ?", array_keys($p)));
+db_query("UPDATE customers SET $set WHERE customer_id = ?", array_merge(array_values($p), [$id]));
+json_out(["status" => "success", "message" => "Customer updated successfully"]);

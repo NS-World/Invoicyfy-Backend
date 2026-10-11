@@ -1,53 +1,24 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
-header('Content-Type: application/json');
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('PUT', 'POST', 'PATCH');
+$user = require_auth();
 
-$data = json_decode(file_get_contents("php://input"), true);
-
-if (empty($data['order_id']) || empty($data['status'])) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "Order ID and status are required"]);
-    exit;
+$data = input();
+$id = int_field($data, 'order_id');
+$status = ucfirst(strtolower((string) str_field($data, 'status', '')));
+if (!$id || !$status) {
+    fail('Order ID and status are required');
 }
-
-$validStatuses = ['Pending', 'Approved', 'Cancelled', 'Invoiced', 'pending', 'approved', 'cancelled', 'invoiced'];
-if (!in_array($data['status'], $validStatuses)) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "Invalid status. Valid statuses are: Pending, Approved, Cancelled, Invoiced"]);
-    exit;
+if (!in_array($status, ['Pending', 'Approved', 'Cancelled'], true)) {
+    fail('Status can be Pending, Approved or Cancelled. Orders become Invoiced when you generate an invoice.');
 }
-
-try {
-    // Check if order exists
-    $checkStmt = $pdo->prepare("SELECT order_id, status FROM orders WHERE order_id = ?");
-    $checkStmt->execute([$data['order_id']]);
-    $order = $checkStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$order) {
-        http_response_code(404);
-        echo json_encode(["status" => "error", "message" => "Order not found"]);
-        exit;
-    }
-
-    // Normalize status to match database (capitalize first letter)
-    $status = ucfirst(strtolower($data['status']));
-
-    // Update status only if different
-    if ($order['status'] !== $status) {
-        $stmt = $pdo->prepare("UPDATE orders SET status = ? WHERE order_id = ?");
-        $stmt->execute([$status, $data['order_id']]);
-    }
-
-    http_response_code(200);
-    echo json_encode([
-        "status" => "success", 
-        "message" => "Order status updated successfully",
-        "order_id" => $data['order_id'],
-        "new_status" => $status
-    ]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => "Database error: " . $e->getMessage()]);
+$order = db_one("SELECT order_id, status, store_id FROM orders WHERE order_id = ?", [$id]);
+if (!$order) {
+    fail('Order not found', 404);
 }
+assert_store_access($user, $order['store_id']);
+if ($order['status'] === 'Invoiced') {
+    fail('This order is already invoiced. Cancel the invoice first to change it.', 409);
+}
+db_query("UPDATE orders SET status = ? WHERE order_id = ?", [$status, $id]);
+json_out(["status" => "success", "message" => "Order status updated successfully", "order_id" => $id, "new_status" => $status]);

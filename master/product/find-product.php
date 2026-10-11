@@ -1,28 +1,20 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/_common.php';
+allow_methods('GET');
+require_auth();
 
-header('Content-Type: application/json');
-$productId = isset($_GET['product_id']) ? (int) $_GET['product_id'] : 0;
-
-if ($productId === 0) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "product_id is required"]);
-    exit;
+$id = int_field($_GET, 'product_id');
+$product = $id ? db_one("SELECT p.*, s.name AS store_name FROM products p LEFT JOIN stores s ON p.store_id = s.store_id WHERE p.product_id = ?", [$id]) : null;
+if (!$product) {
+    fail('Product not found', 404);
 }
+$product = cast_numbers($product, PRODUCT_FLOATS, PRODUCT_INTS);
+$product['sales'] = cast_numbers(db_one(
+    "SELECT COALESCE(SUM(ii.quantity),0) AS qty_sold, COALESCE(SUM(ii.line_total),0) AS revenue
+     FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id
+     WHERE ii.product_id = ? AND i.status <> 'Cancelled'",
+    [$id]
+), ['qty_sold', 'revenue']);
 
-try {
-    $stmt = $pdo->prepare("SELECT p.*, s.name AS store_name FROM products p LEFT JOIN stores s ON p.store_id = s.store_id WHERE p.product_id = ?");
-    $stmt->execute([$productId]);
-    $product = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($product) {
-        echo json_encode(["status" => "success", "data" => $product]);
-    } else {
-        echo json_encode(["status" => "error", "message" => "Product not found"]);
-    }
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-}
+json_out(["status" => "success", "data" => $product]);

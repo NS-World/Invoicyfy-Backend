@@ -1,23 +1,16 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
-header('Content-Type: application/json');
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('DELETE', 'POST', 'PUT');
+$user = require_auth();
 
-$data = json_decode(file_get_contents("php://input"), true);
-
-if (empty($data['order_id'])) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "Order ID is required"]);
-    exit;
+$id = int_field(input(), 'order_id');
+$order = $id ? db_one("SELECT order_id, status, store_id FROM orders WHERE order_id = ?", [$id]) : null;
+if (!$order) {
+    fail('Order not found', 404);
 }
-
-try {
-    $stmt = $pdo->prepare("DELETE FROM orders WHERE order_id = ?");
-    $stmt->execute([$data['order_id']]);
-
-    echo json_encode(["status" => "success", "message" => "Order deleted successfully"]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+assert_store_access($user, $order['store_id']);
+if (db_value("SELECT 1 FROM invoices WHERE order_id = ? LIMIT 1", [$id])) {
+    fail('This order has an invoice and cannot be deleted. Cancel the order instead.', 409);
 }
+db_query("DELETE FROM orders WHERE order_id = ?", [$id]);
+json_out(["status" => "success", "message" => "Order deleted successfully"]);

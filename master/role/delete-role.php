@@ -1,44 +1,19 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('PUT', 'POST', 'DELETE');
+$me = require_auth();
+require_admin($me);
 
-header('Content-Type: application/json');
-
-try {
-     $input = json_decode(file_get_contents("php://input"), true);
-
-    if (!isset($input['role_id'])) {
-        http_response_code(400);
-        echo json_encode(["status" => "error", "message" => "Missing role_id"]);
-        exit;
-    }
-
-    $role_id = (int) $input['role_id'];
-
-    // Start a transaction
-    $pdo->beginTransaction();
-
-    // Step 1: Set role_id to NULL in users table
-    $nullifyUsers = $pdo->prepare("UPDATE users SET role_id = NULL WHERE role_id = ?");
-    $nullifyUsers->execute([$role_id]);
-
-    // TODO: Add other tables where role_id is used if necessary
-
-    // Step 2: Delete the role
-    $deleteRole = $pdo->prepare("DELETE FROM roles WHERE role_id = ?");
-    $deleteRole->execute([$role_id]);
-
-    $pdo->commit();
-    echo json_encode(["status" => "success", "message" => "Role deleted and references cleared."]);
-    
-
-} catch (PDOException $e) {
-    // Rollback on error
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+$id = int_field(input(), 'role_id');
+$name = $id ? db_value("SELECT role_name FROM roles WHERE role_id = ?", [$id]) : null;
+if ($name === null) {
+    fail('Role not found', 404);
 }
+if (strcasecmp($name, 'Admin') === 0) {
+    fail('The Admin role cannot be deleted', 409);
+}
+if (db_value("SELECT 1 FROM users WHERE role_id = ? LIMIT 1", [$id])) {
+    fail('Some users still have this role. Assign them another role first.', 409);
+}
+db_query("DELETE FROM roles WHERE role_id = ?", [$id]);
+json_out(["status" => "success", "message" => "Role deleted successfully"]);

@@ -1,27 +1,22 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('PUT', 'POST', 'DELETE');
+$me = require_auth();
+require_admin($me);
 
-header('Content-Type: application/json');
-$data = json_decode(file_get_contents("php://input"), true);
-
-if (!isset($data['user_id'])) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "user_id is required"]);
-    exit;
+$id = int_field(input(), 'user_id');
+if (!$id) {
+    fail('user_id is required');
 }
-
-try {
-    $stmt = $pdo->prepare("DELETE FROM users WHERE user_id = ?");
-    $stmt->execute([$data['user_id']]);
-
-    if ($stmt->rowCount()) {
-        echo json_encode(["status" => "success", "message" => "User deleted successfully"]);
-    } else {
-        echo json_encode(["status" => "warning", "message" => "User not found"]);
-    }
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+if ($id === (int) $me['user_id']) {
+    fail('You cannot delete your own account', 409);
 }
+$hasHistory = db_value("SELECT 1 FROM invoices WHERE user_id = ? LIMIT 1", [$id]) || db_value("SELECT 1 FROM orders WHERE user_id = ? LIMIT 1", [$id]);
+if ($hasHistory) {
+    db_query("UPDATE users SET is_active = 0 WHERE user_id = ?", [$id]);
+    json_out(["status" => "success", "message" => "User has billing history, so the account was disabled instead of deleted"]);
+}
+if (!db_query("DELETE FROM users WHERE user_id = ?", [$id])->rowCount()) {
+    fail('User not found', 404);
+}
+json_out(["status" => "success", "message" => "User deleted successfully"]);

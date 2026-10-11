@@ -1,64 +1,29 @@
 <?php
-require_once __DIR__ . '/../../config/db.php';
-require_once __DIR__ . '/../../config/cors.php';
-require_once __DIR__ . '/../../auth/validate.php';
+require_once __DIR__ . '/../../lib/bootstrap.php';
+allow_methods('GET');
+require_auth();
 
-header('Content-Type: application/json');
-
-$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
-$offset = ($page - 1) * $limit;
-
-$search = isset($_GET['search']) ? trim($_GET['search']) : '';
-
-try {
-    if (!empty($search)) {
-        $searchParam = "%$search%";
-        $stmt = $pdo->prepare("SELECT customer_id, name, phone, email, address, created_at 
-                               FROM customers 
-                               WHERE name LIKE ? OR phone LIKE ? OR email LIKE ?
-                               ORDER BY created_at DESC 
-                               LIMIT ? OFFSET ?");
-        $stmt->bindValue(1, $searchParam);
-        $stmt->bindValue(2, $searchParam);
-        $stmt->bindValue(3, $searchParam);
-        $stmt->bindValue(4, $limit, PDO::PARAM_INT);
-        $stmt->bindValue(5, $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Count filtered records
-        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM customers 
-                                    WHERE name LIKE ? OR phone LIKE ? OR email LIKE ?");
-        $countStmt->execute([$searchParam, $searchParam, $searchParam]);
-        $total = $countStmt->fetchColumn();
-    } else {
-        // Without search
-        $stmt = $pdo->prepare("SELECT customer_id, name, phone, email, address, created_at 
-                               FROM customers 
-                               ORDER BY created_at DESC 
-                               LIMIT ? OFFSET ?");
-        $stmt->bindValue(1, $limit, PDO::PARAM_INT);
-        $stmt->bindValue(2, $offset, PDO::PARAM_INT);
-        $stmt->execute();
-        $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Count total
-        $totalStmt = $pdo->query("SELECT COUNT(*) FROM customers");
-        $total = $totalStmt->fetchColumn();
-    }
-
-    echo json_encode([
-        "status" => "success",
-        "total" => $total,
-        "page" => $page,
-        "limit" => $limit,
-        "data" => $customers
-    ]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        "status" => "error",
-        "message" => $e->getMessage()
-    ]);
+[$page, $limit, $offset, $search] = pagination();
+$where = '1=1';
+$params = [];
+if ($search !== '') {
+    $like = "%$search%";
+    $where .= " AND (c.name LIKE ? OR c.phone LIKE ? OR c.email LIKE ? OR c.company_name LIKE ? OR c.gstin LIKE ?)";
+    array_push($params, $like, $like, $like, $like, $like);
 }
+if (!empty($_GET['customer_type'])) {
+    $where .= " AND c.customer_type = ?";
+    $params[] = strtoupper($_GET['customer_type']);
+}
+
+$total = (int) db_value("SELECT COUNT(*) FROM customers c WHERE $where", $params);
+$rows = db_all(
+    "SELECT c.*,
+            COALESCE((SELECT SUM(i.balance_due) FROM invoices i WHERE i.customer_id = c.customer_id AND i.status <> 'Cancelled'), 0) AS outstanding
+     FROM customers c WHERE $where
+     ORDER BY c.created_at DESC, c.customer_id DESC LIMIT ? OFFSET ?",
+    array_merge($params, [$limit, $offset])
+);
+$rows = array_map(fn($r) => cast_numbers($r, ['outstanding'], ['customer_id']), $rows);
+
+json_out(["status" => "success", "total" => $total, "page" => $page, "limit" => $limit, "data" => $rows]);
