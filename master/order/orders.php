@@ -42,6 +42,7 @@ $from = "FROM orders o LEFT JOIN customers c ON o.customer_id = c.customer_id
 $total = (int) db_value("SELECT COUNT(*) $from", $params);
 $rows = db_all(
     "SELECT o.*, COALESCE(o.customer_name, c.name, 'Walk-in') AS customer_name, COALESCE(o.customer_phone, c.phone) AS customer_phone,
+            c.gstin AS customer_gstin, c.customer_type,
             u.name AS user_name, s.name AS store_name,
             (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.order_id) AS item_count,
             (SELECT i.invoice_id FROM invoices i WHERE i.order_id = o.order_id AND i.status <> 'Cancelled' ORDER BY i.invoice_id DESC LIMIT 1) AS invoice_id
