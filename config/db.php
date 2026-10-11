@@ -19,7 +19,8 @@ if (!isset($pdo)) {
             ]
         );
         $offset = (new DateTime())->format('P');
-        $pdo->exec("SET time_zone = '$offset'");
+        // Same collation as the tables, so text comparisons never mix collations (some hosts default to another one).
+        $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci, time_zone = '$offset'");
     } catch (PDOException $e) {
         error_log('DB connection failed: ' . $e->getMessage());
         http_response_code(500);

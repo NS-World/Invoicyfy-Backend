@@ -197,8 +197,9 @@ function refresh_campaign(int $id): void
         [$id]
     );
     $done = (int) $s['pending'] === 0;
+    $stopped = db_value('SELECT status FROM campaigns WHERE campaign_id = ?', [$id]) === 'Stopped';
     db_query(
-        "UPDATE campaigns SET sent = ?, failed = ?, status = IF(status = 'Stopped', status, ?), completed_at = IF(? AND completed_at IS NULL, NOW(), completed_at) WHERE campaign_id = ?",
-        [(int) $s['sent'], (int) $s['failed'], $done ? 'Completed' : 'Sending', $done ? 1 : 0, $id]
+        'UPDATE campaigns SET sent = ?, failed = ?, status = ?' . ($done ? ', completed_at = COALESCE(completed_at, NOW())' : '') . ' WHERE campaign_id = ?',
+        [(int) $s['sent'], (int) $s['failed'], $stopped ? 'Stopped' : ($done ? 'Completed' : 'Sending'), $id]
     );
 }
