@@ -21,6 +21,10 @@ php database/migrate.php --admin-email=you@shop.com --admin-password='ChangeMe12
   front-end domain. `.htaccess` blocks `lib/`, `database/`, `vendor/`, `.env` and `_*.php` on Apache;
   on nginx add equivalent `deny` rules.
 
+## Deploy on Hostinger
+
+See [DEPLOY-HOSTINGER.md](DEPLOY-HOSTINGER.md) — app and API on one subdomain, `.env` secrets, migration over SSH.
+
 ## Demo data (for testing)
 
 Fill a **test** database with ~3 months of realistic data for an ice-cream parlour — 20 products with

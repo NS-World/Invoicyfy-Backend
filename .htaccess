@@ -6,7 +6,7 @@ Options -Indexes
     RewriteEngine On
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-    RewriteRule ^(vendor|lib|database|storage)/ - [F,L]
+    RewriteRule ^(vendor|lib|database|storage|tests|config)/ - [F,L]
 </IfModule>
 SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
