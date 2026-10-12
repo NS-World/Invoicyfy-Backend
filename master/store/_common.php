@@ -85,6 +85,7 @@ const INVOICE_SETTING_BOOLS = [
     'show_bank', 'show_upi_qr', 'show_terms', 'show_signature', 'show_customer_phone', 'show_fssai', 'show_item_notes',
     'show_cashier', 'show_payment_mode', 'show_gstin_on_receipt', 'show_tax_on_receipt', 'show_address_on_receipt',
     'receipt_show_price_col', 'receipt_bold_items', 'show_store_name',
+    'kot_auto', 'kot_auto_order', 'kot_show_customer', 'kot_show_store', 'kot_large_text',
 ];
 /** Layout numbers from the designer: [min, max]. */
 const INVOICE_SETTING_NUMBERS = [
