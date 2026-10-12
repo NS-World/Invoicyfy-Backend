@@ -9,6 +9,7 @@ const BACKUP_TABLES = [
     'roles' => ['label' => 'Roles', 'pk' => 'role_id', 'unique' => [['role_name']], 'admin' => true],
     'stores' => ['label' => 'Stores / Business', 'pk' => 'store_id', 'unique' => [['name']], 'exclude' => ['wa_access_token'], 'admin' => true],
     'users' => ['label' => 'Users', 'pk' => 'user_id', 'unique' => [['email']], 'admin' => true],
+    'categories' => ['label' => 'Categories', 'pk' => 'category_id', 'unique' => [['name']]],
     'customers' => ['label' => 'Customers', 'pk' => 'customer_id', 'unique' => [['phone'], ['gstin']]],
     'products' => ['label' => 'Products', 'pk' => 'product_id', 'unique' => [['sku'], ['store_id', 'name']]],
     'orders' => ['label' => 'Orders', 'pk' => 'order_id', 'unique' => [['store_id', 'order_number']]],

@@ -2,3 +2,5 @@
 /vendor/
 /storage/logs/*
 !/storage/logs/.gitkeep
+/uploads/offers/*
+!/uploads/offers/.gitkeep

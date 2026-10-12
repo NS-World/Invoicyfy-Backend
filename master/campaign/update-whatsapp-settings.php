@@ -27,6 +27,7 @@ $row = [
     'wa_phone_number_id' => $phoneId,
     'wa_template_name' => $template,
     'wa_template_lang' => $lang,
+    'wa_template_image' => !empty($d['wa_template_image']) ? 1 : 0,
 ];
 $token = trim((string) ($d['wa_access_token'] ?? ''));
 if ($token !== '') {

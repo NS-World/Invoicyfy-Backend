@@ -15,6 +15,10 @@ php database/migrate.php --admin-email=you@shop.com --admin-password='ChangeMe12
 * `migrate.php` is **CLI only**, safe to run any time and never drops data. It creates missing tables,
   adds new columns to an existing database (including one created by the old `setup-db.php`) and seeds
   roles (Admin / Manager / Staff), a default store and the first admin user.
+* No SSH? After uploading a new version, sign in as admin: a banner offers **Update database**, which runs
+  the same migration from the browser (`master/settings/update-database.php`, admin only).
+* Offers keep sending in the background when a cron job runs every minute:
+  `php /path/to/api/cron/process-campaigns.php` (CLI only). Offer pictures are saved in `uploads/offers/`.
 * Generate JWT secrets with `php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"`.
 * XAMPP: put this folder at `htdocs/invoice-api` → API base URL `http://localhost/invoice-api/`.
 * Production: set `APP_DEBUG=false`, serve over HTTPS, and set `CORS_ALLOWED_ORIGINS` to your

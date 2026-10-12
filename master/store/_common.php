@@ -84,10 +84,19 @@ const INVOICE_SETTING_BOOLS = [
     'show_logo', 'show_status', 'show_hsn_column', 'show_discount_column', 'show_hsn_summary', 'show_amount_in_words',
     'show_bank', 'show_upi_qr', 'show_terms', 'show_signature', 'show_customer_phone', 'show_fssai', 'show_item_notes',
     'show_cashier', 'show_payment_mode', 'show_gstin_on_receipt', 'show_tax_on_receipt', 'show_address_on_receipt',
+    'receipt_show_price_col', 'receipt_bold_items', 'show_store_name',
 ];
+/** Layout numbers from the designer: [min, max]. */
+const INVOICE_SETTING_NUMBERS = [
+    'receipt_font_size' => [8, 20], 'receipt_padding' => [0, 10], 'receipt_line_height' => [1, 2.2], 'receipt_store_name_size' => [0.8, 3],
+    'receipt_col_qty' => [4, 14], 'receipt_col_price' => [5, 16], 'receipt_col_amount' => [5, 16], 'receipt_logo_width' => [15, 70],
+    'a4_font_size' => [8, 15], 'a4_padding' => [0, 20], 'a4_cell_padding' => [1, 10], 'a4_title_size' => [12, 36], 'a4_logo_height' => [20, 120],
+];
+const INVOICE_BLOCK_POSITIONS = ['top', 'after_header', 'before_items', 'after_items', 'after_totals', 'bottom'];
 const INVOICE_SETTING_TEXTS = [
     'a4_template' => 20, 'receipt_template' => 20, 'accent_color' => 7, 'title_tax' => 40, 'title_retail' => 40,
     'header_note' => 200, 'footer_note' => 200, 'signature_label' => 60, 'receipt_header_note' => 120, 'receipt_footer_note' => 200,
+    'receipt_separator' => 10,
 ];
 
 function clean_invoice_settings($raw): array
@@ -108,6 +117,32 @@ function clean_invoice_settings($raw): array
     }
     if (isset($out['accent_color']) && !preg_match('/^#[0-9a-fA-F]{6}$/', $out['accent_color'])) {
         fail('Accent colour must look like #045864');
+    }
+    if (isset($out['receipt_separator']) && !in_array($out['receipt_separator'], ['solid', 'dashed', 'dotted', 'double'], true)) {
+        $out['receipt_separator'] = 'solid';
+    }
+    foreach (INVOICE_SETTING_NUMBERS as $k => [$min, $max]) {
+        if (isset($raw[$k]) && is_numeric($raw[$k])) {
+            $out[$k] = round(min($max, max($min, (float) $raw[$k])), 2);
+        }
+    }
+    // Free text blocks (offers, timings, thank-you lines, emoji...) printed at a chosen place.
+    $out['custom_blocks'] = [];
+    foreach (array_slice((array) ($raw['custom_blocks'] ?? []), 0, 12) as $b) {
+        $text = mb_substr(trim(str_replace("\r", '', (string) ($b['text'] ?? ''))), 0, 500);
+        if ($text === '') {
+            continue;
+        }
+        $out['custom_blocks'][] = [
+            'text' => $text,
+            'position' => in_array($b['position'] ?? '', INVOICE_BLOCK_POSITIONS, true) ? $b['position'] : 'bottom',
+            'align' => in_array($b['align'] ?? '', ['left', 'center', 'right'], true) ? $b['align'] : 'center',
+            'size' => in_array($b['size'] ?? '', ['small', 'normal', 'large', 'xlarge'], true) ? $b['size'] : 'normal',
+            'bold' => !empty($b['bold']),
+            'italic' => !empty($b['italic']),
+            'boxed' => !empty($b['boxed']),
+            'show_on' => in_array($b['show_on'] ?? 'both', ['both', 'a4', 'receipt'], true) ? $b['show_on'] : 'both',
+        ];
     }
     $out['qr_codes'] = [];
     foreach (array_slice((array) ($raw['qr_codes'] ?? []), 0, 4) as $i => $q) {

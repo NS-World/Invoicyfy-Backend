@@ -92,10 +92,10 @@ function endpoint_permission(string $script, string $method): ?array
         return [$folder === 'dashboard' ? 'dashboard' : 'reports', 'view'];
     }
     // Lookups used by billing forms are open to every signed-in user; writes still need permission.
-    $openReads = ['customer', 'product', 'store', 'settings', 'role'];
+    $openReads = ['customer', 'product', 'category', 'store', 'settings', 'role'];
     $module = [
         'order' => 'orders', 'order_items' => 'orders', 'invoice' => 'invoices', 'payment' => 'payments',
-        'customer' => 'customers', 'product' => 'products', 'inventory' => 'inventory', 'expense' => 'expenses',
+        'customer' => 'customers', 'product' => 'products', 'category' => 'products', 'inventory' => 'inventory', 'expense' => 'expenses',
         'store' => 'settings', 'settings' => 'settings', 'user' => 'users', 'role' => 'users',
         'campaign' => 'marketing', 'backup' => 'backup',
     ][$folder] ?? null;

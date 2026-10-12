@@ -376,5 +376,66 @@ check('non-admin cannot download backup (403)', $c === 403, $r);
 check('non-marketing role cannot see offers (403)', $c === 403, $r);
 $token = $adminToken;
 
+echo "\nCategories\n";
+[$c, $r] = call('POST', '/master/category/add-category.php', ['name' => 'Loose Shakes', 'default_unit' => 'ltr', 'gst_rate' => 5, 'weight_presets' => '250,500,1000']);
+check('add category with default unit', $c === 201 && $r['data']['default_unit'] === 'ltr', $r);
+$catId = $r['category_id'] ?? 0;
+[$c, $r] = call('POST', '/master/category/add-category.php', ['name' => 'Loose Shakes']);
+check('duplicate category refused', $c === 409, $r);
+[$c, $r] = call('POST', '/master/product/create-product.php', ['name' => 'Mango Shake Loose', 'price' => 200, 'unit' => 'ltr', 'category' => 'Loose Shakes']);
+check('product in category', $c === 201, $r);
+[$c, $r] = call('POST', '/master/product/create-product.php', ['name' => 'Cone Pack', 'price' => 20, 'unit' => 'pack', 'category' => 'Cones New']);
+[$c, $r] = call('GET', '/master/category/categories.php?search=Cones');
+check('unknown category on a product is added to the master', ($r['data'][0]['name'] ?? '') === 'Cones New' && $r['data'][0]['default_unit'] === 'pack', $r);
+[$c, $r] = call('POST', '/master/category/update-category.php', ['category_id' => $catId, 'name' => 'Loose Milkshakes', 'default_unit' => 'ltr']);
+[$c, $r] = call('GET', '/master/product/products.php?search=Mango');
+check('renaming a category renames it on products', ($r['data'][0]['category'] ?? '') === 'Loose Milkshakes', $r['data'][0] ?? $r);
+[$c, $r] = call('POST', '/master/category/delete-category.php', ['category_id' => $catId]);
+check('category with products cannot be deleted', $c === 409, $r);
+[$c, $r] = call('GET', '/master/product/products.php?sort=popular&limit=5');
+check('popular products list', $c === 200 && array_key_exists('sold_lines', $r['data'][0] ?? []), $r);
+
+echo "\nInvoice layout\n";
+[$c, $r] = call('POST', '/master/store/update-invoice-settings.php', ['invoice_settings' => [
+    'receipt_font_size' => 99, 'receipt_col_qty' => 8, 'receipt_separator' => 'dashed', 'receipt_show_price_col' => false,
+    'custom_blocks' => [['text' => "🎉 Thank you! <b>Come again</b>", 'position' => 'after_totals', 'align' => 'center', 'size' => 'large', 'bold' => true], ['text' => '   '], ['text' => 'x', 'position' => 'evil']],
+]]);
+$saved = json_decode($r['data']['invoice_settings'] ?? '{}', true);
+check('layout numbers clamped to safe range', ($saved['receipt_font_size'] ?? 0) == 20 && ($saved['receipt_col_qty'] ?? 0) == 8 && ($saved['receipt_separator'] ?? '') === 'dashed', $saved);
+check('custom text blocks kept with emoji, empty ones dropped, bad position fixed', count($saved['custom_blocks'] ?? []) === 2 && str_starts_with($saved['custom_blocks'][0]['text'], '🎉') && $saved['custom_blocks'][1]['position'] === 'bottom', $saved['custom_blocks'] ?? null);
+
+echo "\nMulti-channel offers\n";
+[$c, $r] = call('POST', '/master/campaign/update-channel-settings.php', ['email' => ['smtp_host' => 'smtp.example.com', 'smtp_port' => 465, 'smtp_secure' => 'ssl', 'smtp_user' => 'offers@example.com', 'smtp_pass' => 'mail-secret-1', 'from_email' => 'offers@example.com', 'from_name' => 'Test Shop'], 'sms' => ['provider' => 'custom', 'custom_url' => 'https://sms.example.com/send?to={phone}&msg={message}', 'api_key' => 'sms-secret-2']]);
+check('save email + SMS settings', $c === 200 && $r['data']['email']['ready'] && $r['data']['sms']['ready'], $r);
+check('passwords / keys never returned', !str_contains(json_encode($r), 'secret'), $r);
+[$c, $r] = call('POST', '/master/campaign/update-channel-settings.php', ['email' => ['smtp_host' => 'bad host!', 'from_email' => 'x@y.com']]);
+check('bad SMTP host rejected', $c === 400, $r);
+call('POST', '/master/customer/add-customer.php', ['name' => 'Mail Only', 'email' => 'mailonly@example.com']);
+[$c, $r] = call('GET', '/master/campaign/audience.php?channels=whatsapp,email&activity=all');
+check('audience counts per channel', $c === 200 && $r['data']['counts']['email'] >= 1 && $r['data']['counts']['whatsapp'] >= 1, $r);
+[$c, $r] = call('POST', '/master/campaign/create-campaign.php', ['name' => 'Multi', 'message' => 'Hi {name}', 'subject' => 'Offer for {name}', 'channels' => ['whatsapp', 'email'], 'whatsapp_mode' => 'manual', 'audience' => ['activity' => 'all']]);
+check('create WhatsApp + Email campaign', $c === 201 && $r['data']['channels'] === 'whatsapp,email', $r);
+$multiId = $r['data']['campaign_id'] ?? 0;
+[$c, $r] = call('GET', "/master/campaign/get-campaign.php?campaign_id=$multiId&channel=email");
+check('recipients split by channel', $c === 200 && ($r['recipients']['data'][0]['channel'] ?? '') === 'email' && count($r['data']['by_channel']) === 2, $r);
+[$c, $r] = call('POST', '/master/campaign/create-campaign.php', ['name' => 'x', 'message' => 'y', 'channels' => ['fax']]);
+check('unknown channel refused', $c === 400, $r);
+$png = 'data:image/png;base64,' . base64_encode(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='));
+[$c, $r] = call('POST', '/master/campaign/add-image.php', ['image' => $png]);
+check('offer picture upload', $c === 200 && str_ends_with($r['url'] ?? '', '.jpg'), $r);
+[$c, $r] = call('POST', '/master/campaign/add-image.php', ['image' => 'data:image/png;base64,' . base64_encode('<?php echo 1; ?>')]);
+check('non-image upload refused', $c === 400, $r);
+
+echo "\nDatabase update (no SSH)\n";
+[$c, $r] = call('GET', '/master/settings/system-status.php');
+check('admin sees database status', $c === 200 && $r['data']['needs_update'] === false, $r);
+[$c, $r] = call('POST', '/master/settings/update-database.php');
+check('admin can run database update', $c === 200 && isset($r['data']['log']), $r);
+[$c, $r] = call('POST', '/auth/signin.php', ['email' => 'counter@test.com', 'password' => 'Counter@123'], false);
+$token = $r['access_token'];
+[$c, $r] = call('POST', '/master/settings/update-database.php');
+check('non-admin cannot update database (403)', $c === 403, $r);
+$token = $adminToken;
+
 echo "\n$checks checks, $failures failed\n";
 exit($failures ? 1 : 0);

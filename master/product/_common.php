@@ -21,6 +21,7 @@ function product_payload(array $d, array $user): array
     if (!in_array($status, ['Active', 'Inactive'], true)) {
         fail('status must be Active or Inactive');
     }
+    ensure_category(str_field($d, 'category'), str_field($d, 'unit', 'pcs'));
     return [
         'store_id' => write_store($user, $d['store_id'] ?? null),
         'name' => $name,
@@ -38,6 +39,15 @@ function product_payload(array $d, array $user): array
         'low_stock_threshold' => max(0, num_field($d, 'low_stock_threshold', 0)),
         'status' => $status,
     ];
+}
+
+/** A category typed on a product that is not in the category master yet is added there. */
+function ensure_category(?string $name, ?string $unit): void
+{
+    $name = trim((string) $name);
+    if ($name !== '' && !db_value('SELECT 1 FROM categories WHERE name = ?', [$name])) {
+        insert_row('categories', ['name' => mb_substr($name, 0, 100), 'default_unit' => $unit ?: 'pcs']);
+    }
 }
 
 /** "100,250,500" (grams) -> normalised list, max 8 values. */

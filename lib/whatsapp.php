@@ -1,5 +1,7 @@
 <?php
 /**
+ * Offers & messages: WhatsApp, Email and SMS campaigns.
+ *
  * WhatsApp offers (marketing messages).
  *
  * Two ways to send:
@@ -65,6 +67,7 @@ function wa_settings(array $store): array
         'wa_phone_number_id' => $store['wa_phone_number_id'] ?? null,
         'wa_template_name' => $store['wa_template_name'] ?? null,
         'wa_template_lang' => $store['wa_template_lang'] ?: 'en',
+        'wa_template_image' => (bool) ($store['wa_template_image'] ?? false),
         'token_set' => $token !== null,
         'api_ready' => $token !== null && !empty($store['wa_phone_number_id']) && !empty($store['wa_template_name']),
     ];
@@ -74,7 +77,7 @@ function wa_settings(array $store): array
  * Send one template message through the Cloud API. Returns [ok, messageId|null, error|null].
  * Template parameters may not contain new lines or tabs, so those are flattened.
  */
-function wa_send_template(array $store, string $to, array $params): array
+function wa_send_template(array $store, string $to, array $params, ?string $imageUrl = null): array
 {
     $token = wa_decrypt($store['wa_access_token'] ?? null);
     if (!$token || empty($store['wa_phone_number_id']) || empty($store['wa_template_name'])) {
@@ -94,6 +97,13 @@ function wa_send_template(array $store, string $to, array $params): array
             ]],
         ],
     ];
+    // Templates approved with an IMAGE header need the picture with every message.
+    if (!empty($store['wa_template_image'])) {
+        if (!$imageUrl) {
+            return [false, null, 'Your WhatsApp template has an image header: add an offer image'];
+        }
+        array_unshift($body['template']['components'], ['type' => 'header', 'parameters' => [['type' => 'image', 'image' => ['link' => $imageUrl]]]]);
+    }
     $base = rtrim((string) env('WHATSAPP_API_BASE', 'https://graph.facebook.com/v21.0'), '/');
     $ch = curl_init("$base/" . rawurlencode($store['wa_phone_number_id']) . '/messages');
     curl_setopt_array($ch, [
@@ -118,8 +128,11 @@ function wa_send_template(array $store, string $to, array $params): array
     return [false, null, mb_substr((string) $msg, 0, 250)];
 }
 
-/** Customers matching an audience filter (only opted-in customers with a usable phone are sendable). */
-function campaign_audience(array $a, int $storeId): array
+/**
+ * Customers matching an audience filter, as one recipient per channel: WhatsApp / SMS need a usable mobile number,
+ * Email a valid address. Customers who opted out of offers are never included.
+ */
+function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp']): array
 {
     $where = ['1=1'];
     $params = [];
@@ -152,9 +165,10 @@ function campaign_audience(array $a, int $storeId): array
         $order = "(SELECT COALESCE(SUM(i.total_amount), 0) FROM invoices i WHERE i.customer_id = c.customer_id AND i.store_id = " . (int) $storeId . " AND i.status <> 'Cancelled') DESC";
         $limit = ' LIMIT ' . max(1, min(5000, (int) ($a['top'] ?? 50)));
     }
-    $rows = db_all("SELECT c.customer_id, c.name, c.phone, c.marketing_opt_in FROM customers c WHERE " . implode(' AND ', $where) . " ORDER BY $order$limit", $params);
+    $rows = db_all("SELECT c.customer_id, c.name, c.phone, c.email, c.marketing_opt_in FROM customers c WHERE " . implode(' AND ', $where) . " ORDER BY $order$limit", $params);
 
-    $out = ['recipients' => [], 'opted_out' => 0, 'no_phone' => 0, 'matched' => count($rows)];
+    $channels = array_values(array_intersect(['whatsapp', 'sms', 'email'], $channels)) ?: ['whatsapp'];
+    $out = ['recipients' => [], 'opted_out' => 0, 'no_phone' => 0, 'no_email' => 0, 'matched' => count($rows), 'counts' => array_fill_keys($channels, 0)];
     $seen = [];
     foreach ($rows as $r) {
         if (!(int) $r['marketing_opt_in']) {
@@ -162,12 +176,24 @@ function campaign_audience(array $a, int $storeId): array
             continue;
         }
         $phone = wa_phone($r['phone']);
-        if (!$phone || isset($seen[$phone])) {
+        $email = filter_var(trim((string) $r['email']), FILTER_VALIDATE_EMAIL) ?: null;
+        $phoneNeeded = in_array('whatsapp', $channels, true) || in_array('sms', $channels, true);
+        if ($phoneNeeded && !$phone) {
             $out['no_phone']++;
-            continue;
         }
-        $seen[$phone] = true;
-        $out['recipients'][] = ['customer_id' => (int) $r['customer_id'], 'name' => $r['name'], 'phone' => $phone];
+        if (in_array('email', $channels, true) && !$email) {
+            $out['no_email']++;
+        }
+        foreach ($channels as $ch) {
+            $to = $ch === 'email' ? $email : $phone;
+            if (!$to || isset($seen["$ch|$to"])) {
+                continue;
+            }
+            $seen["$ch|$to"] = true;
+            $out['counts'][$ch]++;
+            $out['recipients'][] = ['customer_id' => (int) $r['customer_id'], 'name' => $r['name'], 'channel' => $ch,
+                'phone' => $ch === 'email' ? null : $phone, 'email' => $ch === 'email' ? $email : null];
+        }
     }
     return $out;
 }
