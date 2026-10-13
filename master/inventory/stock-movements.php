@@ -20,12 +20,15 @@ if (!empty($_GET['type'])) {
     $params[] = $_GET['type'];
 }
 $total = (int) db_value("SELECT COUNT(*) FROM stock_movements m WHERE $where", $params);
-$rows = db_all(
+// Ids of one page from the primary key, then those rows with their product / user / bill number.
+$ids = page_ids("SELECT m.movement_id AS id FROM stock_movements m WHERE $where ORDER BY m.movement_id DESC", $params, $limit, $offset);
+$rows = rows_in_order(
     "SELECT m.*, p.name AS product_name, p.unit, u.name AS user_name,
             CASE WHEN m.reference_type = 'invoice' THEN (SELECT invoice_number FROM invoices i WHERE i.invoice_id = m.reference_id) END AS reference_number
      FROM stock_movements m JOIN products p ON p.product_id = m.product_id LEFT JOIN users u ON u.user_id = m.user_id
-     WHERE $where ORDER BY m.movement_id DESC LIMIT ? OFFSET ?",
-    array_merge($params, [$limit, $offset])
+     WHERE m.movement_id IN (%s)",
+    $ids,
+    'movement_id'
 );
 $rows = array_map(fn($r) => cast_numbers($r, ['quantity', 'balance_after', 'unit_cost'], ['movement_id', 'product_id', 'store_id', 'reference_id']), $rows);
 json_out(["status" => "success", "page" => $page, "limit" => $limit, "total" => $total, "data" => $rows]);

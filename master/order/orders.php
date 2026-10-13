@@ -11,11 +11,6 @@ if ($scope !== null) {
     $where .= ' AND o.store_id = ?';
     $params[] = $scope;
 }
-if ($search !== '') {
-    $like = "%$search%";
-    $where .= ' AND (o.order_number LIKE ? OR c.name LIKE ? OR o.customer_name LIKE ? OR o.customer_phone LIKE ? OR c.phone LIKE ?)';
-    array_push($params, $like, $like, $like, $like, $like);
-}
 if (!empty($_GET['status'])) {
     $where .= ' AND o.status = ?';
     $params[] = $_GET['status'];
@@ -37,16 +32,26 @@ if (!empty($_GET['to'])) {
     $params[] = date_field($_GET, 'to');
 }
 
-$from = "FROM orders o LEFT JOIN customers c ON o.customer_id = c.customer_id
-         LEFT JOIN users u ON o.user_id = u.user_id LEFT JOIN stores s ON o.store_id = s.store_id WHERE $where";
-$total = (int) db_value("SELECT COUNT(*) $from", $params);
-$rows = db_all(
+[$join, $joinParams, $searchWhere, $searchParams] = list_search($search, 'orders', 'order_id', 'o',
+    ['o.order_number', 'c.name', 'o.customer_name', 'o.customer_phone', 'c.phone'],
+    ['suffix' => ['order_number'], 'digits' => ['customer_phone'], 'text' => 'customer_name', 'short' => 'customer_name',
+     'via' => ['customers', 'customer_id', 'customer_id', ['digits' => ['phone'], 'text' => 'name, company_name']]],
+    "FROM orders o LEFT JOIN customers c ON o.customer_id = c.customer_id WHERE $where", $params);
+$params = array_merge($joinParams, $params, $searchParams);
+$base = "FROM orders o$join LEFT JOIN customers c ON o.customer_id = c.customer_id WHERE $where$searchWhere";
+
+$total = (int) db_value("SELECT COUNT(*) $base", $params);
+$ids = page_ids("SELECT o.order_id AS id $base ORDER BY o.order_id DESC", $params, $limit, $offset);
+$rows = rows_in_order(
     "SELECT o.*, COALESCE(o.customer_name, c.name, 'Walk-in') AS customer_name, COALESCE(o.customer_phone, c.phone) AS customer_phone,
             c.gstin AS customer_gstin, c.customer_type,
             u.name AS user_name, s.name AS store_name,
             (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.order_id) AS item_count,
             (SELECT i.invoice_id FROM invoices i WHERE i.order_id = o.order_id AND i.status <> 'Cancelled' ORDER BY i.invoice_id DESC LIMIT 1) AS invoice_id
-     $from ORDER BY o.order_id DESC LIMIT ? OFFSET ?",
-    array_merge($params, [$limit, $offset])
+     FROM orders o LEFT JOIN customers c ON o.customer_id = c.customer_id
+     LEFT JOIN users u ON o.user_id = u.user_id LEFT JOIN stores s ON o.store_id = s.store_id
+     WHERE o.order_id IN (%s)",
+    $ids,
+    'order_id'
 );
 json_out(["status" => "success", "page" => $page, "limit" => $limit, "total" => $total, "data" => array_map('doc_cast', $rows)]);

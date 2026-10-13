@@ -293,6 +293,7 @@ foreach (array_slice($products, 3, 3) as $p) {
     }
 }
 
+stats_rebuild();
 out("+ {$counts['retail']} retail bills, {$counts['orders']} B2B orders ({$counts['tax']} GST tax invoices), {$counts['cancelled']} cancelled");
 out('+ ' . db_value("SELECT COUNT(*) FROM expenses WHERE store_id = ?", [$storeId]) . ' expenses');
 out("Done. Login with your admin account, or biller@demo.com / manager@demo.com (password Demo@1234).");

@@ -18,17 +18,19 @@ $from = "$start-04-01";
 $to = ($start + 1) . '-03-31';
 [$si, $sp] = store_filter($user, 'i');
 [$se, $sep] = store_filter($user, 'e');
-[$spay, $spayp] = store_filter($user, 'p');
-$live = "i.status <> 'Cancelled' AND i.invoice_date BETWEEN ? AND ? $si";
+$scope = scope_store($user, $_GET['store_id'] ?? null);
+[$ss, $ssp] = stats_store($scope);
+$S = sales_source();
+$P = payments_source();
 
-function annual_totals(string $from, string $to, string $si, array $sp, string $se, array $sep): array
+function annual_totals(string $from, string $to, string $S, string $ss, array $ssp, string $se, array $sep): array
 {
-    $live = "i.status <> 'Cancelled' AND i.invoice_date BETWEEN ? AND ? $si";
-    $s = db_one("SELECT COUNT(*) AS bills, COALESCE(SUM(i.total_amount),0) AS sales, COALESCE(SUM(i.taxable_amount),0) AS net_sales,
-                        COALESCE(SUM(i.tax_amount),0) AS tax FROM invoices i WHERE $live", array_merge([$from, $to], $sp));
-    $cogs = (float) db_value("SELECT COALESCE(SUM(ii.quantity * ii.cost_price),0) FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id WHERE $live", array_merge([$from, $to], $sp));
+    $s = db_one("SELECT COALESCE(SUM(s.bills),0) AS bills, COALESCE(SUM(s.total),0) AS sales, COALESCE(SUM(s.taxable),0) AS net_sales,
+                        COALESCE(SUM(s.tax),0) AS tax, COALESCE(SUM(s.cogs),0) AS cogs, COALESCE(SUM(s.balance),0) AS balance
+                 FROM $S s WHERE s.status <> 'Cancelled' AND s.day BETWEEN ? AND ?$ss", array_merge([$from, $to], $ssp));
     $e = db_one("SELECT COALESCE(SUM(e.amount),0) AS amount, COALESCE(SUM(e.tax_amount),0) AS tax FROM expenses e WHERE e.expense_date BETWEEN ? AND ? $se", array_merge([$from, $to], $sep));
     $net = (float) $s['net_sales'];
+    $cogs = (float) $s['cogs'];
     $expenses = (float) $e['amount'] - (float) $e['tax'];
     return [
         'bills' => (int) $s['bills'],
@@ -40,6 +42,7 @@ function annual_totals(string $from, string $to, string $si, array $sp, string $
         'expenses' => round((float) $e['amount'], 2),
         'profit' => round($net - $expenses, 2),
         'average_bill' => (int) $s['bills'] ? round((float) $s['sales'] / (int) $s['bills'], 2) : 0,
+        '_balance' => round((float) $s['balance'], 2),
     ];
 }
 
@@ -51,27 +54,22 @@ for ($i = 0; $i < 12; $i++) {
         'tax' => 0.0, 'sales' => 0.0, 'collected' => 0.0, 'cost_of_goods' => 0.0, 'expenses' => 0.0, 'expense_tax' => 0.0,
     ];
 }
-$p = array_merge([$from, $to], $sp);
+$range = array_merge([$from, $to], $ssp);
+$live = "s.status <> 'Cancelled' AND s.day BETWEEN ? AND ?$ss";
 foreach (db_all(
-    "SELECT DATE_FORMAT(i.invoice_date,'%Y-%m') AS m, COUNT(*) AS bills, SUM(i.invoice_type = 'retail') AS retail_bills, SUM(i.invoice_type = 'tax') AS tax_invoices,
-            SUM(i.taxable_amount) AS net_sales, SUM(i.cgst_amount) AS cgst, SUM(i.sgst_amount) AS sgst, SUM(i.igst_amount) AS igst,
-            SUM(i.tax_amount) AS tax, SUM(i.total_amount) AS sales
-     FROM invoices i WHERE $live GROUP BY m",
-    $p
+    "SELECT DATE_FORMAT(s.day,'%Y-%m') AS m, SUM(s.bills) AS bills, SUM(CASE WHEN s.invoice_type = 'retail' THEN s.bills ELSE 0 END) AS retail_bills,
+            SUM(CASE WHEN s.invoice_type = 'tax' THEN s.bills ELSE 0 END) AS tax_invoices,
+            SUM(s.taxable) AS net_sales, SUM(s.cgst) AS cgst, SUM(s.sgst) AS sgst, SUM(s.igst) AS igst, SUM(s.tax) AS tax, SUM(s.total) AS sales,
+            SUM(s.cogs) AS cogs
+     FROM $S s WHERE $live GROUP BY m",
+    $range
 ) as $r) {
+    $r['cost_of_goods'] = round((float) $r['cogs'], 2);
+    unset($r['cogs']);
     $months[$r['m']] = array_merge($months[$r['m']], cast_numbers($r, ['net_sales', 'cgst', 'sgst', 'igst', 'tax', 'sales'], ['bills', 'retail_bills', 'tax_invoices']));
     unset($months[$r['m']]['m']);
 }
-foreach (db_all(
-    "SELECT DATE_FORMAT(i.invoice_date,'%Y-%m') AS m, SUM(ii.quantity * ii.cost_price) AS cogs FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id WHERE $live GROUP BY m",
-    $p
-) as $r) {
-    $months[$r['m']]['cost_of_goods'] = round((float) $r['cogs'], 2);
-}
-foreach (db_all(
-    "SELECT DATE_FORMAT(p.payment_date,'%Y-%m') AS m, SUM(p.amount) AS amount FROM payments p WHERE p.status = 'Completed' AND p.payment_date BETWEEN ? AND ? $spay GROUP BY m",
-    array_merge([$from, $to], $spayp)
-) as $r) {
+foreach (db_all("SELECT DATE_FORMAT(s.day,'%Y-%m') AS m, SUM(s.done_amount) AS amount FROM $P s WHERE s.day BETWEEN ? AND ?$ss GROUP BY m", $range) as $r) {
     $months[$r['m']]['collected'] = round((float) $r['amount'], 2);
 }
 foreach (db_all(
@@ -87,11 +85,15 @@ foreach ($months as &$m) {
 }
 unset($m);
 
-$totals = annual_totals($from, $to, $si, $sp, $se, $sep);
+$totals = annual_totals($from, $to, $S, $ss, $ssp, $se, $sep);
 $totals['collected'] = round(array_sum(array_column($months, 'collected')), 2);
-$totals['outstanding'] = round((float) db_value("SELECT COALESCE(SUM(i.balance_due),0) FROM invoices i WHERE $live", $p), 2);
-$previous = annual_totals(($start - 1) . '-04-01', "$start-03-31", $si, $sp, $se, $sep);
+$totals['outstanding'] = $totals['_balance'];
+unset($totals['_balance']);
+$previous = annual_totals(($start - 1) . '-04-01', "$start-03-31", $S, $ss, $ssp, $se, $sep);
+unset($previous['_balance']);
 $growth = fn($k) => $previous[$k] > 0 ? round(($totals[$k] - $previous[$k]) * 100 / $previous[$k], 1) : null;
+[$items, $itemParams] = items_source($from, $to, $scope);
+[$cust, $custParams] = customers_source($from, $to, $scope);
 
 json_out([
     'status' => 'success',
@@ -103,43 +105,41 @@ json_out([
     'growth' => ['sales' => $growth('sales'), 'profit' => $growth('profit'), 'bills' => $growth('bills')],
     'monthly' => array_values($months),
     'top_products' => f2(db_all(
-        "SELECT COALESCE(ii.product_name,'Item') AS name, MAX(ii.unit) AS unit, SUM(ii.quantity) AS quantity, SUM(ii.line_total) AS sales,
-                SUM(ii.taxable_value - ii.quantity * ii.cost_price) AS margin
-         FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id WHERE $live
-         GROUP BY ii.product_id, ii.product_name ORDER BY sales DESC LIMIT 25",
-        $p
+        "SELECT x.product_name AS name, MAX(x.unit) AS unit, SUM(x.qty) AS quantity, SUM(x.line_total) AS sales, SUM(x.taxable - x.cost) AS margin
+         FROM $items GROUP BY x.product_id, x.product_name ORDER BY sales DESC LIMIT 25",
+        $itemParams
     ), ['quantity', 'sales', 'margin']),
     'categories' => f2(db_all(
-        "SELECT COALESCE(NULLIF(pr.category,''),'Other') AS category, SUM(ii.quantity) AS quantity, SUM(ii.line_total) AS sales
-         FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id LEFT JOIN products pr ON pr.product_id = ii.product_id
-         WHERE $live GROUP BY category ORDER BY sales DESC",
-        $p
+        "SELECT COALESCE(NULLIF(pr.category,''),'Other') AS category, SUM(t.qty) AS quantity, SUM(t.sales) AS sales
+         FROM (SELECT x.product_id, SUM(x.qty) AS qty, SUM(x.line_total) AS sales FROM $items GROUP BY x.product_id) t
+         LEFT JOIN products pr ON pr.product_id = t.product_id GROUP BY category ORDER BY sales DESC",
+        $itemParams
     ), ['quantity', 'sales']),
     'top_customers' => f2(db_all(
-        "SELECT COALESCE(i.customer_name,'Walk-in') AS name, MAX(i.customer_phone) AS phone, COUNT(*) AS bills, SUM(i.total_amount) AS sales, SUM(i.balance_due) AS balance_due
-         FROM invoices i WHERE $live AND i.customer_id IS NOT NULL GROUP BY i.customer_id, i.customer_name ORDER BY sales DESC LIMIT 25",
-        $p
+        "SELECT COALESCE(MAX(x.customer_name),'Walk-in') AS name, MAX(x.customer_phone) AS phone, SUM(x.bills) AS bills, SUM(x.total) AS sales, SUM(x.balance) AS balance_due
+         FROM $cust WHERE x.customer_id <> 0 GROUP BY x.customer_id ORDER BY sales DESC LIMIT 25",
+        $custParams
     ), ['sales', 'balance_due'], ['bills']),
     'payment_modes' => f2(db_all(
-        "SELECT p.payment_method AS method, COUNT(*) AS count, SUM(p.amount) AS amount FROM payments p
-         WHERE p.status = 'Completed' AND p.payment_date BETWEEN ? AND ? $spay GROUP BY p.payment_method ORDER BY amount DESC",
-        array_merge([$from, $to], $spayp)
+        "SELECT s.method, SUM(s.done_count) AS count, SUM(s.done_amount) AS amount FROM $P s
+         WHERE s.day BETWEEN ? AND ?$ss GROUP BY s.method HAVING count > 0 ORDER BY amount DESC",
+        $range
     ), ['amount'], ['count']),
     'order_types' => f2(db_all(
-        "SELECT COALESCE(i.order_type,'Counter') AS type, COUNT(*) AS bills, SUM(i.total_amount) AS sales FROM invoices i WHERE $live GROUP BY type ORDER BY sales DESC",
-        $p
+        "SELECT COALESCE(NULLIF(s.order_type,''),'Counter') AS type, SUM(s.bills) AS bills, SUM(s.total) AS sales FROM $S s WHERE $live GROUP BY type ORDER BY sales DESC",
+        $range
     ), ['sales'], ['bills']),
     'gst_rates' => f2(db_all(
-        "SELECT ii.gst_rate, SUM(ii.taxable_value) AS taxable_value, SUM(ii.cgst_amount) AS cgst, SUM(ii.sgst_amount) AS sgst, SUM(ii.igst_amount) AS igst, SUM(ii.tax_amount) AS tax
-         FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id WHERE $live GROUP BY ii.gst_rate ORDER BY ii.gst_rate",
-        $p
+        "SELECT x.gst_rate, SUM(x.taxable) AS taxable_value, SUM(x.cgst) AS cgst, SUM(x.sgst) AS sgst, SUM(x.igst) AS igst, SUM(x.tax) AS tax
+         FROM $items GROUP BY x.gst_rate ORDER BY x.gst_rate",
+        $itemParams
     ), ['gst_rate', 'taxable_value', 'cgst', 'sgst', 'igst', 'tax']),
     'expenses_by_category' => f2(db_all(
         "SELECT e.category, COUNT(*) AS count, SUM(e.amount) AS amount FROM expenses e WHERE e.expense_date BETWEEN ? AND ? $se GROUP BY e.category ORDER BY amount DESC",
         array_merge([$from, $to], $sep)
     ), ['amount'], ['count']),
     'weekdays' => f2(db_all(
-        "SELECT DAYOFWEEK(i.invoice_date) AS day, COUNT(*) AS bills, SUM(i.total_amount) AS sales FROM invoices i WHERE $live GROUP BY day ORDER BY day",
-        $p
+        "SELECT DAYOFWEEK(s.day) AS day, SUM(s.bills) AS bills, SUM(s.total) AS sales FROM $S s WHERE $live GROUP BY DAYOFWEEK(s.day) ORDER BY day",
+        $range
     ), ['sales'], ['day', 'bills']),
 ]);

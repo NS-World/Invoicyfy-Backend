@@ -18,6 +18,15 @@ require_once __DIR__ . '/../lib/automation.php';
 $deadline = microtime(true) + 50;
 // Daily automatic messages (summary, low stock, birthdays, reminders) when their time has come.
 $jobs = run_scheduled_jobs(microtime(true) + 20);
+// Report summaries: refresh the days changed since the last minute, so reports never wait for it.
+// Once a day also re-check today and yesterday from scratch (safety net for changes made outside the app).
+if (claim_job('stats_recheck', 0, date('Y-m-d'))) {
+    foreach (db_all('SELECT store_id FROM stores') as $st) {
+        stats_touch($st['store_id'], date('Y-m-d'));
+        stats_touch($st['store_id'], date('Y-m-d', strtotime('-1 day')));
+    }
+}
+stats_sync();
 db_query("REPLACE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('cron', 0, CURDATE(), NOW(), 'ok')");
 $released = release_stuck_recipients();
 $sent = 0;

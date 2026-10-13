@@ -120,6 +120,27 @@ Never run it on your live database.
   by the open app): night summary, low stock, birthday/anniversary wish with a one-time coupon, udhaar reminders.
 * Everything important is written to `activity_log` (bills, cancels, deletes, price changes, approvals, logins).
 
+## Speed on large data (lakhs of bills)
+
+Tested with 6 lakh bills, 12 lakh bill items, 5.7 lakh payments, 1.5 lakh customers (about 35 lakh rows):
+bill creation ~15 ms, list screens 5–90 ms, dashboard ~100 ms, GST summary ~5 ms, annual report ~0.4 s.
+
+* **Indexes** for every list filter and sort (date, store + date, status, customer, phone, bill number, GSTIN…).
+* **Search** (`lib/query.php`): when the other filters leave a few thousand rows the search is a plain
+  "contains"; on very large sets it uses indexes instead — bill number / mobile "starts with", exact GSTIN and
+  FULLTEXT word search on names (`list_search()`).
+* **Pagination** reads the ids of one page from an index first ("deferred join"), so page 5,000 is as quick as page 1.
+* **Report summaries** (`lib/stats.php`): `stat_*` tables hold day-wise totals (sales, items, GST, payments) and
+  month-wise items / customers. Every bill, payment, cancel or import marks its day in `stat_dirty`; the next
+  report (or the cron job, every minute) recomputes only those days from the real tables, so figures are always
+  exact. `php tests/stats_check.php` proves the summaries equal a full rebuild. "Update database" (or
+  `php database/migrate.php`) builds them; with many lakh bills run the CLI command (about 50 s per 6 lakh bills).
+* Responses over 1.4 KB are gzip-compressed; every response has `Server-Timing: app;dur=…, db;dur=…`
+  (browser DevTools → Network → Timing) to see whether time goes in PHP/MySQL or on the network.
+* `GET /api/health.php` — 200 when PHP and MySQL answer (for uptime monitors or a load balancer).
+* The API is stateless (JWT, no PHP sessions), so it can run on several servers behind a load balancer with
+  one MySQL database without code changes.
+
 ## Main endpoints
 
 All requests need `Authorization: Bearer <access_token>` except sign-in/refresh. Lists accept
@@ -150,5 +171,6 @@ DB_NAME=invoicyfy_test php database/migrate.php --admin-email=admin@test.com --a
 DB_NAME=invoicyfy_test php -S 127.0.0.1:8080 -t .
 php tests/api_smoke_test.php http://127.0.0.1:8080 admin@test.com Admin@1234
 php tests/api_v3_test.php http://127.0.0.1:8080 admin@test.com Admin@1234   # V3 features, fresh DB
+DB_NAME=invoicyfy_test php tests/stats_check.php                            # report summaries == full rebuild
 ```
 Use a throwaway database — the test creates data.

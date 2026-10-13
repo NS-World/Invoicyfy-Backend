@@ -184,13 +184,14 @@ function create_invoice_record(array $store, array $user, array $head, array $li
             move_stock((int) $l['product_id'], -$l['quantity'], 'sale', 'invoice', $invoiceId, $number, (int) $user['user_id']);
         }
     }
+    stats_touch($store['store_id'], $head['invoice_date'] ?? date('Y-m-d'));
     return $invoiceId;
 }
 
 /** Recalculate amount_paid / balance_due / status from the payments table. */
 function refresh_invoice_payment_status(int $invoiceId): void
 {
-    $inv = db_one("SELECT total_amount, status FROM invoices WHERE invoice_id = ?", [$invoiceId]);
+    $inv = db_one("SELECT total_amount, status, store_id, invoice_date FROM invoices WHERE invoice_id = ?", [$invoiceId]);
     if (!$inv) {
         return;
     }
@@ -207,6 +208,7 @@ function refresh_invoice_payment_status(int $invoiceId): void
         $status = 'Unpaid';
     }
     db_query("UPDATE invoices SET amount_paid = ?, balance_due = ?, status = ? WHERE invoice_id = ?", [$paid, $balance, $status, $invoiceId]);
+    stats_touch($inv['store_id'], $inv['invoice_date']);
 }
 
 function record_payment(array $invoice, array $user, array $p): int
@@ -240,6 +242,7 @@ function record_payment(array $invoice, array $user, array $p): int
         'status' => 'Completed',
     ] + (($session = open_cash_session((int) $invoice['store_id'])) ? ['cash_session_id' => (int) $session['session_id']] : []));
     // ^ Day close: the payment counts in the cash register session that is open right now.
+    stats_touch($invoice['store_id'], date_field($p, 'payment_date', date('Y-m-d')));
     refresh_invoice_payment_status((int) $invoice['invoice_id']);
     return $id;
 }

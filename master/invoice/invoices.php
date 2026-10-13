@@ -11,11 +11,6 @@ if ($scope !== null) {
     $where .= ' AND i.store_id = ?';
     $params[] = $scope;
 }
-if ($search !== '') {
-    $like = "%$search%";
-    $where .= ' AND (i.invoice_number LIKE ? OR i.customer_name LIKE ? OR i.customer_phone LIKE ? OR i.customer_gstin LIKE ?)';
-    array_push($params, $like, $like, $like, $like);
-}
 if (!empty($_GET['status'])) {
     if ($_GET['status'] === 'Overdue') {
         $where .= " AND i.status IN ('Unpaid','Partial') AND i.due_date IS NOT NULL AND i.due_date < CURDATE()";
@@ -43,23 +38,72 @@ if (!empty($_GET['to'])) {
     $params[] = date_field($_GET, 'to');
 }
 
-$total = (int) db_value("SELECT COUNT(*) FROM invoices i WHERE $where", $params);
-$summary = cast_numbers(db_one(
-    "SELECT COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.total_amount END),0) AS total_amount,
-            COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.amount_paid END),0) AS amount_paid,
-            COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.balance_due END),0) AS balance_due,
-            COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.tax_amount END),0) AS tax_amount
-     FROM invoices i WHERE $where",
-    $params
-), ['total_amount', 'amount_paid', 'balance_due', 'tax_amount']);
-$rows = db_all(
+// Search: "contains" on a small filtered set; on very large sets bill number / mobile "starts with",
+// exact GSTIN or customer name words (FULLTEXT index).
+[$join, $joinParams, $searchWhere, $searchParams] = list_search($search, 'invoices', 'invoice_id', 'i',
+    ['i.invoice_number', 'i.customer_name', 'i.customer_phone', 'i.customer_gstin'],
+    ['prefix' => ['invoice_number'], 'digits' => ['customer_phone'], 'gstin' => 'customer_gstin', 'text' => 'customer_name', 'short' => 'customer_name'],
+    "FROM invoices i WHERE $where", $params);
+$params = array_merge($joinParams, $params, $searchParams);
+$base = "FROM invoices i$join WHERE $where$searchWhere";
+
+$status = (string) ($_GET['status'] ?? '');
+if ($search === '' && empty($_GET['customer_id']) && $status !== 'Overdue' && stats_sync()) {
+    // Count and totals from the day summaries (same filters: store, status, bill type, dates) — no bill is read.
+    $sw = '1=1';
+    $sp = [];
+    if ($scope !== null) {
+        $sw .= ' AND s.store_id = ?';
+        $sp[] = $scope;
+    }
+    if ($status === 'Due') {
+        $sw .= " AND s.status IN ('Unpaid','Partial')";
+    } elseif ($status !== '') {
+        $sw .= ' AND s.status = ?';
+        $sp[] = $status;
+    }
+    if (!empty($_GET['invoice_type'])) {
+        $sw .= ' AND s.invoice_type = ?';
+        $sp[] = $_GET['invoice_type'];
+    }
+    if (!empty($_GET['from'])) {
+        $sw .= ' AND s.day >= ?';
+        $sp[] = date_field($_GET, 'from');
+    }
+    if (!empty($_GET['to'])) {
+        $sw .= ' AND s.day <= ?';
+        $sp[] = date_field($_GET, 'to');
+    }
+    $sql = "SELECT COALESCE(SUM(s.bills),0) AS total_rows,
+                   COALESCE(SUM(CASE WHEN s.status <> 'Cancelled' THEN s.total END),0) AS total_amount,
+                   COALESCE(SUM(CASE WHEN s.status <> 'Cancelled' THEN s.paid END),0) AS amount_paid,
+                   COALESCE(SUM(CASE WHEN s.status <> 'Cancelled' THEN s.balance END),0) AS balance_due,
+                   COALESCE(SUM(CASE WHEN s.status <> 'Cancelled' THEN s.tax END),0) AS tax_amount
+            FROM stat_sales_daily s WHERE $sw";
+    $sumParams = $sp;
+} else {
+    // Count and totals in one pass over the matching bills.
+    $sql = "SELECT COUNT(*) AS total_rows, COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.total_amount END),0) AS total_amount,
+                   COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.amount_paid END),0) AS amount_paid,
+                   COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.balance_due END),0) AS balance_due,
+                   COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.tax_amount END),0) AS tax_amount
+            $base";
+    $sumParams = $params;
+}
+$summary = cast_numbers(db_one($sql, $sumParams), ['total_amount', 'amount_paid', 'balance_due', 'tax_amount'], ['total_rows']);
+$total = $summary['total_rows'];
+unset($summary['total_rows']);
+// One page of ids from the (store, date) / (date) index, then just those rows.
+$ids = page_ids("SELECT i.invoice_id AS id $base ORDER BY i.invoice_date DESC, i.invoice_id DESC", $params, $limit, $offset);
+$rows = rows_in_order(
     "SELECT i.invoice_id, i.invoice_number, i.invoice_type, i.order_id, i.customer_id, i.customer_name, i.customer_phone,
             i.customer_gstin, i.store_id, s.name AS store_name, i.user_id, u.name AS user_name, i.invoice_date, i.due_date,
             i.order_type, i.taxable_amount, i.tax_amount, i.total_amount, i.amount_paid, i.balance_due, i.status, i.created_at,
             (i.status IN ('Unpaid','Partial') AND i.due_date IS NOT NULL AND i.due_date < CURDATE()) AS is_overdue
      FROM invoices i LEFT JOIN stores s ON s.store_id = i.store_id LEFT JOIN users u ON u.user_id = i.user_id
-     WHERE $where ORDER BY i.invoice_date DESC, i.invoice_id DESC LIMIT ? OFFSET ?",
-    array_merge($params, [$limit, $offset])
+     WHERE i.invoice_id IN (%s)",
+    $ids,
+    'invoice_id'
 );
 $rows = array_map(fn($r) => doc_cast($r) + ['is_overdue' => (bool) $r['is_overdue']], $rows);
 

@@ -100,7 +100,7 @@ function daily_summary_text(array $store, string $date): string
     $s = db_one(
         "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS total, COALESCE(SUM(balance_due),0) AS credit, COALESCE(SUM(discount_amount),0) AS discount
          FROM invoices WHERE store_id = ? AND invoice_date = ? AND status <> 'Cancelled'", [$sid, $date]);
-    $cancel = db_one("SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS total FROM invoices WHERE store_id = ? AND DATE(cancelled_at) = ? AND status = 'Cancelled'", [$sid, $date]);
+    $cancel = db_one("SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS total FROM invoices WHERE store_id = ? AND cancelled_at >= ? AND cancelled_at < ? AND status = 'Cancelled'", [$sid, "$date 00:00:00", date('Y-m-d', strtotime("$date +1 day")) . ' 00:00:00']);
     $pays = db_all('SELECT payment_method, SUM(amount) AS amount FROM payments WHERE store_id = ? AND payment_date = ? GROUP BY payment_method ORDER BY amount DESC', [$sid, $date]);
     $exp = (float) db_value('SELECT COALESCE(SUM(amount),0) FROM expenses WHERE store_id = ? AND expense_date = ?', [$sid, $date]);
     $top = db_all(
@@ -268,7 +268,7 @@ function customers_with_dues(int $storeId, float $minAmount, int $minDays, ?arra
     return db_all(
         "SELECT c.customer_id, c.name, c.phone, c.email, c.last_reminder_at, SUM(i.balance_due) AS due, COUNT(*) AS bills, MIN(i.invoice_date) AS oldest
          FROM invoices i JOIN customers c ON c.customer_id = i.customer_id
-         WHERE i.store_id = ? AND i.status <> 'Cancelled' AND i.balance_due > 0 AND i.invoice_date <= ?$only
+         WHERE i.status IN ('Unpaid','Partial') AND i.store_id = ? AND i.balance_due > 0 AND i.invoice_date <= ?$only
          GROUP BY c.customer_id, c.name, c.phone, c.email, c.last_reminder_at HAVING due >= ? ORDER BY due DESC",
         $params
     );

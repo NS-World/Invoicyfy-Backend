@@ -106,7 +106,12 @@ return [
             'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
             'updated_at' => 'TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP',
         ],
-        'indexes' => ['idx_customers_phone' => '(phone)', 'idx_customers_name' => '(name)'],
+        'indexes' => [
+            'idx_customers_phone' => '(phone)', 'idx_customers_name' => '(name)', 'idx_customers_gstin' => '(gstin)', 'idx_customers_email' => '(email)',
+            'idx_customers_created' => '(created_at, customer_id)', 'idx_customers_city' => '(city)',
+            'idx_customers_birthday' => '(birthday)', 'idx_customers_anniversary' => '(anniversary)',
+        ],
+        'fulltext' => ['ft_customers_name' => '(name, company_name)'],
     ],
 
     'categories' => [
@@ -180,7 +185,11 @@ return [
             'FOREIGN KEY (user_id) REFERENCES users(user_id)',
             'FOREIGN KEY (store_id) REFERENCES stores(store_id)',
         ],
-        'indexes' => ['idx_orders_store_date' => '(store_id, order_date)', 'idx_orders_status' => '(status)'],
+        'indexes' => [
+            'idx_orders_store_date' => '(store_id, order_date)', 'idx_orders_status' => '(status)',
+            'idx_orders_date' => '(order_date, order_id)', 'idx_orders_customer' => '(customer_id, order_date)', 'idx_orders_phone' => '(customer_phone)',
+        ],
+        'fulltext' => ['ft_orders_customer' => '(customer_name)'],
         'uniques' => ['uq_orders_number' => '(store_id, order_number)'],
         'drop_indexes' => ['order_number'],
     ],
@@ -278,7 +287,18 @@ return [
             'idx_invoices_status' => '(status)',
             'idx_invoices_customer' => '(customer_id)',
             'idx_invoices_order' => '(order_id)',
+            'idx_invoices_date' => '(invoice_date, invoice_id)',
+            'idx_invoices_customer_date' => '(customer_id, invoice_date)',
+            'idx_invoices_status_date' => '(status, invoice_date)',
+            'idx_invoices_status_due' => '(status, due_date)',
+            'idx_invoices_dues' => '(status, customer_id, store_id, invoice_date, balance_due)',
+            'idx_invoices_store_created' => '(store_id, created_at)',
+            'idx_invoices_store_cancelled' => '(store_id, cancelled_at)',
+            'idx_invoices_phone' => '(customer_phone)',
+            'idx_invoices_number' => '(invoice_number)',
+            'idx_invoices_gstin' => '(customer_gstin)',
         ],
+        'fulltext' => ['ft_invoices_customer' => '(customer_name)'],
         'uniques' => ['uq_invoices_number' => '(store_id, fy, invoice_number)', 'uq_invoices_client_uuid' => '(client_uuid)'],
         'drop_indexes' => ['invoice_number'],
     ],
@@ -313,6 +333,7 @@ return [
             'FOREIGN KEY (invoice_id) REFERENCES invoices(invoice_id) ON DELETE CASCADE',
             'FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE SET NULL',
         ],
+        'indexes' => ['idx_items_product_invoice' => '(product_id, invoice_id)'],
     ],
 
     'payments' => [
@@ -335,7 +356,10 @@ return [
         'constraints' => [
             'FOREIGN KEY (invoice_id) REFERENCES invoices(invoice_id) ON DELETE CASCADE',
         ],
-        'indexes' => ['idx_payments_invoice' => '(invoice_id)', 'idx_payments_store_date' => '(store_id, payment_date)'],
+        'indexes' => [
+            'idx_payments_invoice' => '(invoice_id)', 'idx_payments_store_date' => '(store_id, payment_date)',
+            'idx_payments_date' => '(payment_date, payment_id)', 'idx_payments_customer' => '(customer_id, payment_date)', 'idx_payments_reference' => '(reference_no)', 'idx_payments_session' => '(cash_session_id)',
+        ],
     ],
 
     'expenses' => [
@@ -355,7 +379,8 @@ return [
             'updated_at' => 'TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP',
         ],
         'constraints' => ['FOREIGN KEY (store_id) REFERENCES stores(store_id)'],
-        'indexes' => ['idx_expenses_store_date' => '(store_id, expense_date)', 'idx_expenses_category' => '(category)'],
+        'indexes' => ['idx_expenses_store_date' => '(store_id, expense_date)', 'idx_expenses_category' => '(category)', 'idx_expenses_date' => '(expense_date, expense_id)'],
+        'fulltext' => ['ft_expenses_text' => '(description, vendor)'],
     ],
 
     'stock_movements' => [
@@ -374,7 +399,7 @@ return [
             'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
         ],
         'constraints' => ['FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE'],
-        'indexes' => ['idx_stock_product' => '(product_id, created_at)'],
+        'indexes' => ['idx_stock_product' => '(product_id, created_at)', 'idx_stock_store' => '(store_id, movement_id)', 'idx_stock_type' => '(movement_type, movement_id)'],
     ],
 
     'document_sequences' => [
@@ -578,7 +603,143 @@ return [
             'idx_activity_store_date' => '(store_id, created_at)',
             'idx_activity_action' => '(action, created_at)',
             'idx_activity_user' => '(user_id, created_at)',
+            'idx_activity_created' => '(created_at, log_id)',
         ],
+        'fulltext' => ['ft_activity_summary' => '(summary)'],
+    ],
+
+    /* Report summary tables (lib/stats.php). Rebuilt from the bills at any time; never edited by hand. */
+    'stat_sales_daily' => [
+        'columns' => [
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+            'invoice_type' => 'VARCHAR(10) NOT NULL',
+            'order_type' => "VARCHAR(20) NOT NULL DEFAULT ''",
+            'status' => 'VARCHAR(20) NOT NULL',
+            'bills' => 'INT NOT NULL DEFAULT 0',
+            'subtotal' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'discount' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'taxable' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'sgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'igst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'tax' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'total' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'paid' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'balance' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cogs' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+        ],
+        'primary' => '(store_id, day, invoice_type, order_type, status)',
+        'indexes' => ['idx_stat_sales_day' => '(day)'],
+    ],
+
+    'stat_items_daily' => [
+        'columns' => [
+            'id' => 'BIGINT AUTO_INCREMENT PRIMARY KEY',
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+            'product_id' => 'INT NOT NULL DEFAULT 0',
+            'product_name' => 'VARCHAR(255) NOT NULL',
+            'unit' => 'VARCHAR(50) NULL',
+            'gst_rate' => 'DECIMAL(5,2) NOT NULL DEFAULT 0',
+            'qty' => 'DECIMAL(16,3) NOT NULL DEFAULT 0',
+            'taxable' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'sgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'igst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'tax' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'line_total' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cost' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'bills' => 'INT NOT NULL DEFAULT 0',
+        ],
+        'indexes' => ['idx_stat_items_store_day' => '(store_id, day)', 'idx_stat_items_day' => '(day)', 'idx_stat_items_product' => '(product_id, day)'],
+    ],
+
+    'stat_items_monthly' => [
+        'columns' => [
+            'id' => 'BIGINT AUTO_INCREMENT PRIMARY KEY',
+            'store_id' => 'INT NOT NULL',
+            'month' => 'DATE NOT NULL',
+            'product_id' => 'INT NOT NULL DEFAULT 0',
+            'product_name' => 'VARCHAR(255) NOT NULL',
+            'unit' => 'VARCHAR(50) NULL',
+            'gst_rate' => 'DECIMAL(5,2) NOT NULL DEFAULT 0',
+            'qty' => 'DECIMAL(16,3) NOT NULL DEFAULT 0',
+            'taxable' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'sgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'igst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'tax' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'line_total' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cost' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'bills' => 'INT NOT NULL DEFAULT 0',
+        ],
+        'indexes' => ['idx_stat_items_m_store' => '(store_id, month)', 'idx_stat_items_m_month' => '(month)'],
+    ],
+
+    'stat_customers_monthly' => [
+        'columns' => [
+            'id' => 'BIGINT AUTO_INCREMENT PRIMARY KEY',
+            'store_id' => 'INT NOT NULL',
+            'month' => 'DATE NOT NULL',
+            'customer_id' => 'INT NOT NULL DEFAULT 0',
+            'customer_name' => 'VARCHAR(255) NULL',
+            'customer_phone' => 'VARCHAR(20) NULL',
+            'customer_gstin' => 'VARCHAR(15) NULL',
+            'bills' => 'INT NOT NULL DEFAULT 0',
+            'taxable' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'tax' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'total' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'paid' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'balance' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+        ],
+        'indexes' => ['idx_stat_cust_store_month' => '(store_id, month)', 'idx_stat_cust_month' => '(month)'],
+    ],
+
+    'stat_gst_daily' => [
+        'columns' => [
+            'id' => 'BIGINT AUTO_INCREMENT PRIMARY KEY',
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+            'b2b' => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'place_of_supply' => "VARCHAR(100) NOT NULL DEFAULT '-'",
+            'hsn_code' => "VARCHAR(10) NOT NULL DEFAULT '-'",
+            'unit' => "VARCHAR(50) NOT NULL DEFAULT 'OTH'",
+            'gst_rate' => 'DECIMAL(5,2) NOT NULL DEFAULT 0',
+            'description' => 'VARCHAR(255) NULL',
+            'qty' => 'DECIMAL(16,3) NOT NULL DEFAULT 0',
+            'line_total' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'taxable' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'cgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'sgst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'igst' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'tax' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+        ],
+        'indexes' => ['idx_stat_gst_store_day' => '(store_id, day)', 'idx_stat_gst_day' => '(day)'],
+    ],
+
+    'stat_payments_daily' => [
+        'columns' => [
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+            'method' => 'VARCHAR(50) NOT NULL',
+            'live_amount' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'live_count' => 'INT NOT NULL DEFAULT 0',
+            'done_amount' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'done_count' => 'INT NOT NULL DEFAULT 0',
+            'all_amount' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'all_count' => 'INT NOT NULL DEFAULT 0',
+        ],
+        'primary' => '(store_id, day, method)',
+        'indexes' => ['idx_stat_pay_day' => '(day)'],
+    ],
+
+    'stat_dirty' => [
+        'columns' => [
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+        ],
+        'primary' => '(store_id, day)',
     ],
 
     'job_runs' => [

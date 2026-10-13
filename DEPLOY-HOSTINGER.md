@@ -209,6 +209,18 @@ chahiye. App ek baar online khulne ke baad internet ke bina bhi khul jaati hai (
 
 **Demo & help:** upar **Demo & help** (topi wala icon) dabao — har screen ka step-by-step demo.
 
+## Speed (API fast rakhne ke liye)
+
+* Naya version upload karke **Update database** zaroor dabao: naye indexes + report summary tables bante hain.
+  Data bahut bada ho (lakhs bills) to SSH se `cd public_html/billing/api && php database/migrate.php` chalao
+  (browser timeout se bachne ke liye).
+* **Cron job** (upar wala, har minute) report summaries ko bhi taaza rakhta hai — zaroor lagao.
+* hPanel → **Advanced → PHP Configuration**: PHP **8.3**, **OPcache ON**, `memory_limit` 256M.
+* `api/.env` me `DB_HOST=localhost` rakho (Hostinger ka MySQL usi server par hota hai — IP/remote host se slow hota hai).
+* Speed check: browser me F12 → Network → koi API request → **Timing** tab me `Server-Timing` dikhega
+  (`app` = server ka total time, `db` = MySQL time). Agar ye kam hai par request slow hai to network/hosting ki dikkat hai.
+* Uptime check URL: `https://billing.scoopiez.in/api/health.php` (200 = sab theek).
+
 ## Backup ki aadat
 
 * App: **Backup & Restore → Download full backup** hafte me kam se kam ek baar. File ko Google Drive

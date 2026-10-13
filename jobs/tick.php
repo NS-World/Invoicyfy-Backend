@@ -10,6 +10,7 @@ require_auth();
 
 @set_time_limit(60);
 $log = run_scheduled_jobs(microtime(true) + 25);
+stats_sync(); // report summaries for the days changed since the last tick
 // Also push pending automatic messages a little further.
 release_stuck_recipients();
 foreach (array_column(db_all("SELECT campaign_id FROM campaigns WHERE status = 'Sending' AND channel = 'api' ORDER BY campaign_id LIMIT 3"), 'campaign_id') as $id) {

@@ -41,11 +41,31 @@ function normalize_type(string $t): string
 }
 
 
-/** Number of schema changes waiting (missing tables / columns), without changing anything. */
+/** Changes whenever schema.php changes; stored after a successful migration so the check below is one query. */
+function schema_fingerprint(): string
+{
+    // Report summary changes (lib/stats.php) also need an "Update database" to rebuild them.
+    preg_match("/const STATS_VERSION = '([^']+)'/", (string) file_get_contents(__DIR__ . '/stats.php'), $m);
+    return md5((string) file_get_contents(__DIR__ . '/../database/schema.php')) . '-' . ($m[1] ?? 'stats');
+}
+
+/** Number of schema changes waiting (missing tables / columns / indexes), without changing anything. */
 function pending_schema_changes(PDO $pdo, string $dbName): array
 {
+    try {
+        $s = $pdo->prepare("SELECT result FROM job_runs WHERE job = 'schema' AND store_id = 0 AND run_date = '2000-01-01'");
+        $s->execute();
+        if ($s->fetchColumn() === schema_fingerprint()) {
+            return [];
+        }
+    } catch (PDOException $e) {
+        // job_runs missing: an update is needed anyway.
+    }
     $schema = require __DIR__ . '/../database/schema.php';
     $pending = [];
+    $s = $pdo->prepare('SELECT DISTINCT CONCAT(TABLE_NAME, ".", INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ?');
+    $s->execute([$dbName]);
+    $indexes = array_flip($s->fetchAll(PDO::FETCH_COLUMN));
     foreach ($schema as $table => $def) {
         if (!table_exists($pdo, $dbName, $table)) {
             $pending[] = "table $table";
@@ -55,6 +75,11 @@ function pending_schema_changes(PDO $pdo, string $dbName): array
         foreach (array_keys($def['columns']) as $col) {
             if (!isset($existing[$col])) {
                 $pending[] = "$table.$col";
+            }
+        }
+        foreach (array_keys(($def['indexes'] ?? []) + ($def['fulltext'] ?? [])) as $name) {
+            if (!isset($indexes["$table.$name"])) {
+                $pending[] = "index $table.$name";
             }
         }
     }
@@ -85,6 +110,9 @@ function run_migrations(PDO $pdo, string $dbName, array $opts = []): array
             }
             foreach ($def['uniques'] ?? [] as $name => $cols) {
                 $parts[] = "UNIQUE KEY `$name` $cols";
+            }
+            foreach ($def['fulltext'] ?? [] as $name => $cols) {
+                $parts[] = "FULLTEXT KEY `$name` $cols";
             }
             foreach ($def['constraints'] ?? [] as $c) {
                 $parts[] = $c;
@@ -135,6 +163,18 @@ function run_migrations(PDO $pdo, string $dbName, array $opts = []): array
                 $changes++;
             }
         }
+        foreach ($def['fulltext'] ?? [] as $name => $cols) {
+            if (!index_exists($pdo, $dbName, $table, $name)) {
+                // Word search index (needs MySQL 5.6+ / MariaDB 10.0.5+ with InnoDB). Search still works without it.
+                try {
+                    $pdo->exec("ALTER TABLE `$table` ADD FULLTEXT INDEX `$name` $cols");
+                    $out("+ word-search index $table.$name");
+                    $changes++;
+                } catch (PDOException $e) {
+                    $out("! could not add word-search index $table.$name: " . $e->getMessage());
+                }
+            }
+        }
         foreach ($def['drop_indexes'] ?? [] as $name) {
             if (index_exists($pdo, $dbName, $table, $name)) {
                 $pdo->exec("ALTER TABLE `$table` DROP INDEX `$name`");
@@ -159,7 +199,7 @@ function run_migrations(PDO $pdo, string $dbName, array $opts = []): array
     $pdo->exec("UPDATE orders SET subtotal = total_amount, taxable_amount = total_amount WHERE subtotal = 0 AND total_amount > 0");
     $pdo->exec("UPDATE orders SET order_date = DATE(created_at) WHERE order_date IS NULL");
     $pdo->exec("UPDATE orders SET order_number = CONCAT('ORD-', order_id) WHERE order_number IS NULL OR order_number = ''");
-    $pdo->exec("UPDATE invoices SET balance_due = GREATEST(total_amount - amount_paid, 0) WHERE status <> 'Cancelled' AND balance_due = 0 AND amount_paid < total_amount");
+    $fixedBalances = $pdo->exec("UPDATE invoices SET balance_due = GREATEST(total_amount - amount_paid, 0) WHERE status <> 'Cancelled' AND balance_due = 0 AND amount_paid < total_amount");
 
     $pdo->exec("UPDATE invoices SET fy = IF(MONTH(invoice_date) >= 4,
         CONCAT(LPAD(MOD(YEAR(invoice_date),100),2,'0'),'-',LPAD(MOD(YEAR(invoice_date)+1,100),2,'0')),
@@ -258,6 +298,20 @@ function run_migrations(PDO $pdo, string $dbName, array $opts = []): array
         }
     }
 
+
+    // Report summary tables: (re)built once per version, then kept up to date by every bill and payment.
+    if (table_exists($pdo, $dbName, 'stat_sales_daily')) {
+        require_once __DIR__ . '/stats.php';
+        if (!stats_ready() || $fixedBalances) {
+            $t = microtime(true);
+            stats_rebuild();
+            $out(sprintf('+ built report summaries (%.1fs)', microtime(true) - $t));
+            $changes++;
+        }
+    }
+
+    // Remember this schema version so the "Update database" check is a single quick query.
+    $pdo->prepare("REPLACE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('schema', 0, '2000-01-01', NOW(), ?)")->execute([schema_fingerprint()]);
 
     $out($changes ? "Migration finished ($changes change(s))." : 'Database already up to date.');
     return ['changes' => $changes, 'log' => $log];

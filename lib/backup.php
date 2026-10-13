@@ -245,5 +245,13 @@ function backup_import_row(string $table, array $raw): array
         error_log('[Invoicyfy import] ' . $e->getMessage());
         return ['error', 'Could not save this row'];
     }
+    // Report summaries: the imported bill / payment / item's day is recomputed on the next report.
+    if ($table === 'invoices') {
+        stats_touch($row['store_id'] ?? 0, $row['invoice_date'] ?? null);
+    } elseif ($table === 'payments') {
+        stats_touch($row['store_id'] ?? 0, $row['payment_date'] ?? null);
+    } elseif ($table === 'invoice_items' && !empty($row['invoice_id'])) {
+        stats_touch_invoice((int) $row['invoice_id']);
+    }
     return ['inserted', $note];
 }

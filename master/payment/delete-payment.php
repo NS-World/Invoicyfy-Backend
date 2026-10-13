@@ -11,6 +11,7 @@ if (!$payment) {
 }
 assert_store_access($user, $payment['store_id']);
 db_query("DELETE FROM payments WHERE payment_id = ?", [$id]);
+stats_touch($payment['store_id'] ?? 0, $payment['payment_date']);
 if ($payment['invoice_id']) {
     refresh_invoice_payment_status((int) $payment['invoice_id']);
 }

@@ -11,11 +11,6 @@ if ($scope !== null) {
     $where .= ' AND e.store_id = ?';
     $params[] = $scope;
 }
-if ($search !== '') {
-    $like = "%$search%";
-    $where .= ' AND (e.category LIKE ? OR e.description LIKE ? OR e.vendor LIKE ? OR e.reference_no LIKE ?)';
-    array_push($params, $like, $like, $like, $like);
-}
 if (!empty($_GET['category'])) {
     $where .= ' AND e.category = ?';
     $params[] = $_GET['category'];
@@ -29,16 +24,25 @@ if (!empty($_GET['to'])) {
     $params[] = date_field($_GET, 'to');
 }
 
-$total = (int) db_value("SELECT COUNT(*) FROM expenses e WHERE $where", $params);
+[$join, $joinParams, $searchWhere, $searchParams] = list_search($search, 'expenses', 'expense_id', 'e',
+    ['e.category', 'e.description', 'e.vendor', 'e.reference_no'],
+    ['prefix' => ['category', 'reference_no'], 'text' => 'description, vendor', 'short' => 'vendor'],
+    "FROM expenses e WHERE $where", $params);
+$params = array_merge($joinParams, $params, $searchParams);
+$base = "FROM expenses e$join WHERE $where$searchWhere";
+
+$total = (int) db_value("SELECT COUNT(*) $base", $params);
 $byCategory = array_map(
     fn($r) => cast_numbers($r, ['amount'], ['count']),
-    db_all("SELECT e.category, COUNT(*) AS count, SUM(e.amount) AS amount FROM expenses e WHERE $where GROUP BY e.category ORDER BY amount DESC", $params)
+    db_all("SELECT e.category, COUNT(*) AS count, SUM(e.amount) AS amount $base GROUP BY e.category ORDER BY amount DESC", $params)
 );
-$rows = db_all(
+$ids = page_ids("SELECT e.expense_id AS id $base ORDER BY e.expense_date DESC, e.expense_id DESC", $params, $limit, $offset);
+$rows = rows_in_order(
     "SELECT e.*, s.name AS store_name, u.name AS user_name FROM expenses e
      LEFT JOIN stores s ON s.store_id = e.store_id LEFT JOIN users u ON u.user_id = e.user_id
-     WHERE $where ORDER BY e.expense_date DESC, e.expense_id DESC LIMIT ? OFFSET ?",
-    array_merge($params, [$limit, $offset])
+     WHERE e.expense_id IN (%s)",
+    $ids,
+    'expense_id'
 );
 json_out([
     "status" => "success", "page" => $page, "limit" => $limit, "total" => $total,

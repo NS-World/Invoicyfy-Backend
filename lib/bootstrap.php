@@ -15,6 +15,15 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header_remove('X-Powered-By');
+header('Referrer-Policy: no-referrer');
+// API answers hold business data: browsers and proxies must not keep copies.
+header('Cache-Control: no-store, max-age=0');
+
+/** Time spent in the database during this request (reported in the Server-Timing header). */
+$GLOBALS['__db_ms'] = 0.0;
+$GLOBALS['__db_n'] = 0;
 
 class ApiException extends RuntimeException
 {
@@ -47,6 +56,8 @@ require_once __DIR__ . '/documents.php';
 require_once __DIR__ . '/activity.php';
 require_once __DIR__ . '/settings.php';
 require_once __DIR__ . '/billing.php';
+require_once __DIR__ . '/query.php';
+require_once __DIR__ . '/stats.php';
 
 /* ----------------------------------------------------------------------------
  * Request / response helpers
@@ -55,7 +66,24 @@ require_once __DIR__ . '/billing.php';
 function json_out(array $payload, int $code = 200): void
 {
     http_response_code($code);
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION);
+    $body = (string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_INVALID_UTF8_SUBSTITUTE);
+    if (!headers_sent()) {
+        // Where the time went (shown in the browser's Network tab > Timing): total PHP time and database time.
+        $total = (microtime(true) - ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) * 1000;
+        header(sprintf('Server-Timing: app;dur=%.1f, db;dur=%.1f;desc="%d queries"', $total, $GLOBALS['__db_ms'] ?? 0, $GLOBALS['__db_n'] ?? 0));
+        // Big lists / reports are compressed (5-10x smaller), unless the web server already does it.
+        $accept = (string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '');
+        if (strlen($body) > 1400 && stripos($accept, 'gzip') !== false && function_exists('gzencode') && !ini_get('zlib.output_compression')) {
+            $zipped = gzencode($body, 5);
+            if ($zipped !== false) {
+                $body = $zipped;
+                header('Content-Encoding: gzip');
+                header('Vary: Accept-Encoding', false);
+            }
+        }
+        header('Content-Length: ' . strlen($body));
+    }
+    echo $body;
     exit;
 }
 
@@ -170,6 +198,7 @@ function date_range(?string $defaultFrom = null, ?string $defaultTo = null): arr
 function db_query(string $sql, array $params = []): PDOStatement
 {
     global $pdo;
+    $t = microtime(true);
     $stmt = $pdo->prepare($sql);
     $i = 1;
     foreach ($params as $p) {
@@ -177,6 +206,8 @@ function db_query(string $sql, array $params = []): PDOStatement
         $stmt->bindValue($i++, $p, $type);
     }
     $stmt->execute();
+    $GLOBALS['__db_ms'] = ($GLOBALS['__db_ms'] ?? 0) + (microtime(true) - $t) * 1000;
+    $GLOBALS['__db_n'] = ($GLOBALS['__db_n'] ?? 0) + 1;
     return $stmt;
 }
 

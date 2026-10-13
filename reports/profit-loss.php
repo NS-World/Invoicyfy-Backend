@@ -5,8 +5,9 @@ allow_methods('GET');
 $user = require_auth();
 
 [$from, $to] = date_range(date('Y') . '-' . (date('n') >= 4 ? '04-01' : '01-01'));
-[$si, $sp] = store_filter($user, 'i');
 [$se, $sep] = store_filter($user, 'e');
+[$ss, $ssp] = stats_store(scope_store($user, $_GET['store_id'] ?? null));
+$S = sales_source();
 
 $rows = [];
 $cursor = new DateTime(substr($from, 0, 7) . '-01');
@@ -17,20 +18,13 @@ while ($cursor <= $last) {
     $cursor->modify('+1 month');
 }
 foreach (db_all(
-    "SELECT DATE_FORMAT(i.invoice_date,'%Y-%m') AS m, SUM(i.total_amount) AS sales, SUM(i.taxable_amount) AS net_sales, SUM(i.tax_amount) AS tax
-     FROM invoices i WHERE i.status <> 'Cancelled' AND i.invoice_date BETWEEN ? AND ? $si GROUP BY m",
-    array_merge([$from, $to], $sp)
+    "SELECT DATE_FORMAT(s.day,'%Y-%m') AS m, SUM(s.total) AS sales, SUM(s.taxable) AS net_sales, SUM(s.tax) AS tax, SUM(s.cogs) AS cogs
+     FROM $S s WHERE s.status <> 'Cancelled' AND s.day BETWEEN ? AND ?$ss GROUP BY m",
+    array_merge([$from, $to], $ssp)
 ) as $r) {
     $rows[$r['m']]['sales'] = (float) $r['sales'];
     $rows[$r['m']]['net_sales'] = (float) $r['net_sales'];
     $rows[$r['m']]['tax'] = (float) $r['tax'];
-}
-foreach (db_all(
-    "SELECT DATE_FORMAT(i.invoice_date,'%Y-%m') AS m, SUM(ii.quantity * ii.cost_price) AS cogs
-     FROM invoice_items ii JOIN invoices i ON i.invoice_id = ii.invoice_id
-     WHERE i.status <> 'Cancelled' AND i.invoice_date BETWEEN ? AND ? $si GROUP BY m",
-    array_merge([$from, $to], $sp)
-) as $r) {
     $rows[$r['m']]['cost_of_goods'] = round((float) $r['cogs'], 2);
 }
 foreach (db_all(

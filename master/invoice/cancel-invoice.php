@@ -24,6 +24,7 @@ if ($inv['irn']) {
 }
 
 db_query("UPDATE invoices SET status = 'Cancelled', cancel_reason = ?, cancelled_at = NOW(), balance_due = 0 WHERE invoice_id = ?", [$reason, $id]);
+stats_touch_invoice($id); // the bill's day and the days of its payments
 foreach (db_all("SELECT product_id, quantity FROM invoice_items WHERE invoice_id = ? AND product_id IS NOT NULL", [$id]) as $it) {
     move_stock((int) $it['product_id'], (float) $it['quantity'], 'cancel', 'invoice', $id, "Cancelled {$inv['invoice_number']}", (int) $user['user_id']);
 }
