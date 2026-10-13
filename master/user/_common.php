@@ -33,7 +33,25 @@ function user_payload(array $d, bool $creating): array
         }
         $p['password'] = password_hash($password, PASSWORD_BCRYPT);
     }
+    // V3: manager approval PIN for discounts above a cashier's limit (4-8 digits, stored hashed).
+    $pin = (string) ($d['approval_pin'] ?? '');
+    if ($pin !== '') {
+        $p['approval_pin'] = approval_pin_hash($pin);
+    } elseif (bool_field($d, 'clear_approval_pin')) {
+        $p['approval_pin'] = null;
+    }
     return $p;
+}
+
+function approval_pin_hash(string $pin): string
+{
+    if (!preg_match('/^\d{4,8}$/', $pin)) {
+        fail('Approval PIN must be 4 to 8 digits');
+    }
+    if (preg_match('/^(\d)\1+$/', $pin) || in_array($pin, ['1234', '12345', '123456', '1234567', '12345678', '0123', '4321'], true)) {
+        fail('Choose a less obvious PIN (not 1111 or 1234)');
+    }
+    return password_hash($pin, PASSWORD_BCRYPT);
 }
 
 /** Only an Admin may create, edit or assign the Admin role (prevents privilege escalation). */
@@ -67,4 +85,4 @@ function user_duplicate_check(array $p, int $excludeId = 0): void
 }
 
 const USER_COLUMNS = "u.user_id, u.name, u.email, u.phone, u.city, u.store_id, u.role_id, u.is_active, u.last_login_at, u.created_at,
-                      r.role_name, s.name AS store_name";
+                      (u.approval_pin IS NOT NULL) AS has_approval_pin, r.role_name, s.name AS store_name";

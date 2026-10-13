@@ -13,6 +13,7 @@ $head['status'] = 'Pending';
 $orderId = insert_row('orders', $head);
 write_order_items($orderId, $lines);
 $pdo->commit();
+log_activity('order.create', 'order', $orderId, "Order {$head['order_number']} " . rupees($head['total_amount']), [], $head['store_id']);
 
 json_out([
     "status" => "success",

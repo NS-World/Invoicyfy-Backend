@@ -24,6 +24,16 @@ function customer_payload(array $d): array
     }
     $stateCode = resolve_state_code(str_field($d, 'state_code'), $gstin, str_field($d, 'state'));
     $optIn = array_key_exists('marketing_opt_in', $d) ? ['marketing_opt_in' => bool_field($d, 'marketing_opt_in', true) ? 1 : 0] : [];
+    // V3: birthday / anniversary for automatic wishes (only saved when the form sends them).
+    foreach (['birthday' => 'Birthday', 'anniversary' => 'Anniversary'] as $k => $label) {
+        if (array_key_exists($k, $d)) {
+            $v = date_field($d, $k);
+            if ($v && ($v > date('Y-m-d') || $v < '1900-01-01')) {
+                fail("$label date looks wrong");
+            }
+            $optIn[$k] = $v;
+        }
+    }
     return $optIn + [
         'customer_type' => $type,
         'name' => $name,

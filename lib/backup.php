@@ -22,6 +22,11 @@ const BACKUP_TABLES = [
     'document_sequences' => ['label' => 'Bill number series', 'pk' => null, 'unique' => [['store_id', 'doc_type', 'fy']], 'merge' => true],
     'campaigns' => ['label' => 'Offer campaigns', 'pk' => 'campaign_id'],
     'campaign_recipients' => ['label' => 'Campaign recipients', 'pk' => 'recipient_id'],
+    'coupons' => ['label' => 'Coupons', 'pk' => 'coupon_id', 'unique' => [['store_id', 'code']]],
+    'coupon_redemptions' => ['label' => 'Coupon uses', 'pk' => 'redemption_id'],
+    'loyalty_ledger' => ['label' => 'Loyalty points history', 'pk' => 'entry_id'],
+    'cash_sessions' => ['label' => 'Day close (cash register)', 'pk' => 'session_id', 'exclude' => ['open_lock']],
+    'cash_movements' => ['label' => 'Cash pay in / out', 'pk' => 'movement_id'],
 ];
 
 /** Column definitions for a table from the schema (name => SQL definition). */

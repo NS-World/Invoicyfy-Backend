@@ -104,6 +104,22 @@ Never run it on your live database.
   `audience.php`, `campaigns.php`, `get-campaign.php`, `create-campaign.php`, `send-batch.php`,
   `mark-sent.php`, `update-campaign.php`. Permission module `marketing`.
 
+## Version 3 rules
+
+* `create-invoice.php` accepts `payments: [{payment_method, amount, reference_no}]` (split payment, max 6,
+  sum ≤ total; the old single `payment` still works), `table_no`, `coupon_code`, `redeem_points`,
+  `approval_pin`, `client_uuid` and `offline_created_at`.
+* `client_uuid` makes creation idempotent: the same bill sent twice (offline sync, double click) is saved
+  once and the second call returns it with `duplicate: true`.
+* Coupon and points discounts are worked out on the server (`quote-bill.php` for the preview, again with row
+  locks when saving) and spread over the lines so GST stays correct. Cancelling a bill returns them.
+* Discount limit: a role's `max_discount_percent`; above it the request needs a manager's `approval_pin`
+  (403 `approval_required` / `approval_wrong_pin`, 5 wrong tries in 15 min → 429).
+* `require_day_open` (counter setting) → 409 `day_not_open` until the day is opened (offline bills skip it).
+* Automatic messages run once a day per store from `cron/process-campaigns.php` (or `jobs/tick.php`, called
+  by the open app): night summary, low stock, birthday/anniversary wish with a one-time coupon, udhaar reminders.
+* Everything important is written to `activity_log` (bills, cancels, deletes, price changes, approvals, logins).
+
 ## Main endpoints
 
 All requests need `Authorization: Bearer <access_token>` except sign-in/refresh. Lists accept
@@ -121,6 +137,11 @@ All requests need `Authorization: Bearer <access_token>` except sign-in/refresh.
 | Reports | `reports/dashboard.php`, `reports/sales.php?group=day\|month\|product\|customer`, `reports/gst-summary.php`, `reports/profit-loss.php`, `reports/annual.php?fy=2026` (financial year April 2026 – March 2027) |
 | Backup | `master/backup/*` (see above) |
 | Offers | `master/campaign/*` (see above) |
+| Day close (V3) | `master/cash/current.php`, `create-session.php`, `add-movement.php`, `close-session.php`, `sessions.php`, `get-session.php` |
+| Billing (V3) | `master/invoice/quote-bill.php` (server totals with coupon/points), `master/held/*` (hold/park bills), `master/pos/pos-settings.php` |
+| Coupons & loyalty (V3) | `master/coupon/*` (`check-coupon.php`), `master/loyalty/*` |
+| Udhaar (V3) | `master/credit/dues.php`, `customer-statement.php`, `add-payment.php` (oldest bills first), `send-reminders.php` |
+| Activity & automation (V3) | `master/activity/activity-log.php`, `master/automation/*`, `jobs/tick.php`, `auth/set-approval-pin.php` |
 
 ## Testing
 
@@ -128,5 +149,6 @@ All requests need `Authorization: Bearer <access_token>` except sign-in/refresh.
 DB_NAME=invoicyfy_test php database/migrate.php --admin-email=admin@test.com --admin-password=Admin@1234
 DB_NAME=invoicyfy_test php -S 127.0.0.1:8080 -t .
 php tests/api_smoke_test.php http://127.0.0.1:8080 admin@test.com Admin@1234
+php tests/api_v3_test.php http://127.0.0.1:8080 admin@test.com Admin@1234   # V3 features, fresh DB
 ```
 Use a throwaway database — the test creates data.

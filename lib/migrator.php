@@ -202,6 +202,34 @@ function run_migrations(PDO $pdo, string $dbName, array $opts = []): array
         }
     }
 
+    // V3: give existing roles the new screens (Day close, Coupons & Loyalty, Activity log) once.
+    if (table_exists($pdo, $dbName, 'job_runs')) {
+        require_once __DIR__ . '/permissions.php';
+        $claim = $pdo->prepare("INSERT IGNORE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('v3_role_permissions', 0, '2000-01-01', NOW(), 'done')");
+        $claim->execute();
+        if ($claim->rowCount()) {
+            $upd = $pdo->prepare('UPDATE roles SET permissions = ? WHERE role_id = ?');
+            foreach ($pdo->query("SELECT role_id, role_name, permissions FROM roles WHERE permissions IS NOT NULL AND role_name <> 'Admin'")->fetchAll() as $r) {
+                $perms = json_decode((string) $r['permissions'], true);
+                if (!is_array($perms)) {
+                    continue;
+                }
+                $add = V3_ROLE_DEFAULTS[$r['role_name']] ?? (!empty($perms['invoices']) ? ['cash' => ['view', 'add', 'edit'], 'loyalty' => ['view']] : []);
+                $changed = false;
+                foreach ($add as $module => $actions) {
+                    if (!isset($perms[$module])) {
+                        $perms[$module] = $actions;
+                        $changed = true;
+                    }
+                }
+                if ($changed) {
+                    $upd->execute([json_encode($perms), $r['role_id']]);
+                    $out("+ role {$r['role_name']}: access to the new V3 screens");
+                }
+            }
+        }
+    }
+
     /* ---------------- Seed defaults ---------------- */
     if (!(int) $pdo->query("SELECT COUNT(*) FROM roles")->fetchColumn()) {
         $pdo->exec("INSERT INTO roles (role_name) VALUES ('Admin'), ('Manager'), ('Staff')");

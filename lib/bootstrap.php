@@ -44,6 +44,9 @@ require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/gst.php';
 require_once __DIR__ . '/documents.php';
+require_once __DIR__ . '/activity.php';
+require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/billing.php';
 
 /* ----------------------------------------------------------------------------
  * Request / response helpers

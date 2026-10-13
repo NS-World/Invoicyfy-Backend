@@ -148,6 +148,12 @@ function create_invoice_record(array $store, array $user, array $head, array $li
 {
     [$number, $fy] = next_invoice_number($store, $head['invoice_type'], $head['invoice_date']);
 
+    // V3 columns are only written when used, so plain bills keep working even before "Update database" is pressed.
+    foreach (['table_no', 'coupon_code', 'coupon_discount', 'loyalty_points_redeemed', 'loyalty_discount', 'loyalty_points_earned', 'approved_by', 'client_uuid', 'offline_at'] as $k) {
+        if (array_key_exists($k, $head) && ($head[$k] === null || $head[$k] === '' || $head[$k] === 0 || $head[$k] === 0.0)) {
+            unset($head[$k]);
+        }
+    }
     $invoiceId = insert_row('invoices', [
         'invoice_number' => $number,
         'fy' => $fy,
@@ -157,6 +163,8 @@ function create_invoice_record(array $store, array $user, array $head, array $li
         'invoice_type', 'order_id', 'customer_id', 'customer_name', 'customer_phone', 'customer_email', 'customer_gstin',
         'billing_address', 'shipping_address', 'place_of_supply', 'place_of_supply_code', 'is_interstate', 'reverse_charge',
         'invoice_date', 'due_date', 'order_type', 'notes', 'terms', 'eway_bill_no', 'vehicle_no',
+        'table_no', 'coupon_code', 'coupon_discount', 'loyalty_points_redeemed', 'loyalty_discount', 'loyalty_points_earned',
+        'approved_by', 'client_uuid', 'offline_at',
     ]) + pick($totals, [
         'subtotal', 'discount_amount', 'taxable_amount', 'cgst_amount', 'sgst_amount', 'igst_amount', 'tax_amount',
         'round_off', 'total_amount',
@@ -230,7 +238,8 @@ function record_payment(array $invoice, array $user, array $p): int
         'reference_no' => str_field($p, 'reference_no'),
         'notes' => str_field($p, 'notes'),
         'status' => 'Completed',
-    ]);
+    ] + (($session = open_cash_session((int) $invoice['store_id'])) ? ['cash_session_id' => (int) $session['session_id']] : []));
+    // ^ Day close: the payment counts in the cash register session that is open right now.
     refresh_invoice_payment_status((int) $invoice['invoice_id']);
     return $id;
 }

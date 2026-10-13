@@ -21,5 +21,6 @@ $pdo->beginTransaction();
 update_row('orders', 'order_id', $orderId, $head);
 write_order_items($orderId, $lines);
 $pdo->commit();
+log_activity('order.update', 'order', $orderId, "Edited order {$existing['order_number']}: " . rupees($existing['total_amount']) . ' → ' . rupees($head['total_amount']), [], $existing['store_id']);
 
 json_out(["status" => "success", "message" => "Order updated successfully", "data" => load_order($orderId)]);

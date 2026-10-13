@@ -30,6 +30,22 @@ foreach (db_all("SELECT product_id, quantity FROM invoice_items WHERE invoice_id
 if ($inv['order_id']) {
     db_query("UPDATE orders SET status = 'Approved' WHERE order_id = ? AND status = 'Invoiced'", [$inv['order_id']]);
 }
+// V3: give back the coupon use and loyalty points of this bill.
+if (!empty($inv['coupon_code'])) {
+    foreach (db_all("SELECT redemption_id, coupon_id FROM coupon_redemptions WHERE invoice_id = ? AND status = 'Used'", [$id]) as $r) {
+        db_query("UPDATE coupon_redemptions SET status = 'Reversed' WHERE redemption_id = ?", [$r['redemption_id']]);
+        db_query('UPDATE coupons SET used_count = GREATEST(used_count - 1, 0) WHERE coupon_id = ?', [$r['coupon_id']]);
+    }
+}
+if ($inv['customer_id'] && ((float) ($inv['loyalty_points_earned'] ?? 0) > 0 || (float) ($inv['loyalty_points_redeemed'] ?? 0) > 0)) {
+    if ((float) $inv['loyalty_points_earned'] > 0) {
+        loyalty_post((int) $inv['customer_id'], (int) $inv['store_id'], $id, 'reverse', -(float) $inv['loyalty_points_earned'], "Bill {$inv['invoice_number']} cancelled", (int) $user['user_id']);
+    }
+    if ((float) $inv['loyalty_points_redeemed'] > 0) {
+        loyalty_post((int) $inv['customer_id'], (int) $inv['store_id'], $id, 'reverse', (float) $inv['loyalty_points_redeemed'], "Points returned: bill {$inv['invoice_number']} cancelled", (int) $user['user_id']);
+    }
+}
 $pdo->commit();
+log_activity('invoice.cancel', 'invoice', $id, "Cancelled bill {$inv['invoice_number']} " . rupees($inv['total_amount']) . " — $reason", ['reason' => $reason], $inv['store_id']);
 
 json_out(["status" => "success", "message" => "Invoice {$inv['invoice_number']} cancelled. Stock has been restored."]);

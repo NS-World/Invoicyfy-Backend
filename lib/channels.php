@@ -262,15 +262,31 @@ function sms_send(array $store, string $phone, string $text): array
 /** Text for one recipient, with the offer image link for channels that cannot attach images. */
 function campaign_text(array $c, array $store, array $r, bool $withImageLink): string
 {
-    $text = wa_personalise((string) $c['message'], (string) ($r['name'] ?? ''), (string) $store['name']);
+    $text = recipient_vars(wa_personalise((string) $c['message'], (string) ($r['name'] ?? ''), (string) $store['name']), $r);
     return $withImageLink && !empty($c['image_url']) ? $text . "\n" . $c['image_url'] : $text;
+}
+
+/** Per-person values ({due}, {coupon}...) stored on the recipient row by reminders and birthday wishes. */
+function recipient_vars(string $text, array $r): string
+{
+    $vars = !empty($r['vars']) ? json_decode((string) $r['vars'], true) : null;
+    if (!is_array($vars) || !$vars) {
+        return $text;
+    }
+    $map = [];
+    foreach ($vars as $k => $v) {
+        if (is_scalar($v)) {
+            $map['{' . $k . '}'] = (string) $v;
+        }
+    }
+    return strtr($text, $map);
 }
 
 function send_to_recipient(array $c, array $store, array $r): array
 {
     switch ($r['channel']) {
         case 'email':
-            return email_send($store, (string) $r['email'], wa_personalise((string) ($c['subject'] ?: $c['name']), (string) ($r['name'] ?? ''), (string) $store['name']), campaign_text($c, $store, $r, false), $c['image_url'] ?: null);
+            return email_send($store, (string) $r['email'], recipient_vars(wa_personalise((string) ($c['subject'] ?: $c['name']), (string) ($r['name'] ?? ''), (string) $store['name']), $r), campaign_text($c, $store, $r, false), $c['image_url'] ?: null);
         case 'sms':
             return sms_send($store, (string) $r['phone'], campaign_text($c, $store, $r, true));
         default:

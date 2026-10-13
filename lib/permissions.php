@@ -19,6 +19,38 @@ const PERMISSION_MODULES = [
     'users' => ['label' => 'Users, Roles & Stores', 'actions' => ['view', 'add', 'edit', 'delete']],
     'marketing' => ['label' => 'Offers & Messages', 'actions' => ['view', 'add', 'edit']],
     'backup' => ['label' => 'Backup & Restore', 'actions' => ['view', 'add']],
+    'cash' => ['label' => 'Day Close / Cash Register', 'actions' => ['view', 'add', 'edit']],
+    'loyalty' => ['label' => 'Coupons & Loyalty', 'actions' => ['view', 'add', 'edit', 'delete']],
+    'activity' => ['label' => 'Activity Log', 'actions' => ['view']],
+];
+
+/** Modules added in V3, given to existing roles once so nobody loses access to the new screens after an upgrade. */
+const V3_ROLE_DEFAULTS = [
+    'Manager' => ['cash' => ['view', 'add', 'edit'], 'loyalty' => ['view', 'add', 'edit', 'delete'], 'activity' => ['view']],
+    'Staff' => ['cash' => ['view', 'add', 'edit'], 'loyalty' => ['view']],
+];
+
+/**
+ * Endpoints whose permission is not what the folder/file name would suggest:
+ * billing staff must be able to check a coupon, park a bill and read POS settings while billing.
+ */
+const ENDPOINT_PERMISSION_OVERRIDES = [
+    'coupon/check-coupon' => ['invoices', 'add'],
+    'invoice/quote-bill' => ['invoices', 'add'],
+    'held/held-bills' => ['invoices', 'add'],
+    'held/add-held' => ['invoices', 'add'],
+    'held/delete-held' => ['invoices', 'add'],
+    'pos/pos-settings' => null,
+    'pos/update-pos-settings' => ['settings', 'edit'],
+    'loyalty/customer-points' => ['invoices', 'add'],
+    'credit/dues' => ['payments', 'view'],
+    'credit/customer-statement' => ['payments', 'view'],
+    'credit/add-payment' => ['payments', 'add'],
+    'credit/send-reminders' => ['payments', 'add'],
+    'automation/automation-settings' => ['settings', 'view'],
+    'automation/update-automation-settings' => ['settings', 'edit'],
+    'automation/run-now' => ['settings', 'edit'],
+    'automation/job-history' => ['settings', 'view'],
 ];
 
 const DEFAULT_ROLE_PERMISSIONS = [
@@ -26,11 +58,11 @@ const DEFAULT_ROLE_PERMISSIONS = [
         'dashboard' => ['view'], 'orders' => ['view', 'add', 'edit', 'delete'], 'invoices' => ['view', 'add', 'edit', 'delete'],
         'payments' => ['view', 'add', 'delete'], 'customers' => ['view', 'add', 'edit', 'delete'], 'products' => ['view', 'add', 'edit', 'delete'],
         'inventory' => ['view', 'add'], 'expenses' => ['view', 'add', 'edit', 'delete'], 'reports' => ['view'], 'settings' => ['view', 'edit'],
-        'marketing' => ['view', 'add', 'edit'],
+        'marketing' => ['view', 'add', 'edit'], 'cash' => ['view', 'add', 'edit'], 'loyalty' => ['view', 'add', 'edit', 'delete'], 'activity' => ['view'],
     ],
     'Staff' => [
         'dashboard' => ['view'], 'orders' => ['view', 'add', 'edit'], 'invoices' => ['view', 'add'], 'payments' => ['view', 'add'],
-        'customers' => ['view', 'add', 'edit'], 'products' => ['view'], 'inventory' => ['view'],
+        'customers' => ['view', 'add', 'edit'], 'products' => ['view'], 'inventory' => ['view'], 'cash' => ['view', 'add', 'edit'], 'loyalty' => ['view'],
     ],
 ];
 
@@ -88,6 +120,9 @@ function endpoint_permission(string $script, string $method): ?array
         return null; // auth/* etc.
     }
     [, $area, $folder, $file] = $m;
+    if ($area === 'master' && array_key_exists("$folder/$file", ENDPOINT_PERMISSION_OVERRIDES)) {
+        return ENDPOINT_PERMISSION_OVERRIDES["$folder/$file"];
+    }
     if ($area === 'reports') {
         return [$folder === 'dashboard' ? 'dashboard' : 'reports', 'view'];
     }
@@ -98,6 +133,8 @@ function endpoint_permission(string $script, string $method): ?array
         'customer' => 'customers', 'product' => 'products', 'category' => 'products', 'inventory' => 'inventory', 'expense' => 'expenses',
         'store' => 'settings', 'settings' => 'settings', 'user' => 'users', 'role' => 'users',
         'campaign' => 'marketing', 'backup' => 'backup',
+        'cash' => 'cash', 'coupon' => 'loyalty', 'loyalty' => 'loyalty', 'activity' => 'activity',
+        'credit' => 'payments', 'automation' => 'settings', 'pos' => 'settings', 'held' => 'invoices',
     ][$folder] ?? null;
     if (!$module) {
         return null;

@@ -15,4 +15,5 @@ if (db_value("SELECT 1 FROM users WHERE role_id = ? LIMIT 1", [$id])) {
     fail('Some users still have this role. Assign them another role first.', 409);
 }
 db_query("DELETE FROM roles WHERE role_id = ?", [$id]);
+log_activity('role.delete', 'role', $id, "Deleted role $name");
 json_out(["status" => "success", "message" => "Role deleted successfully"]);

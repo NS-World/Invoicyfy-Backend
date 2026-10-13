@@ -61,4 +61,5 @@ if ($type === 'purchase' && bool_field($d, 'record_expense') && $unitCost) {
 $pdo->commit();
 
 $stock = (float) db_value("SELECT stock_qty FROM products WHERE product_id = ?", [$productId]);
+log_activity('stock.' . $type, 'product', $productId, "Stock $type {$product['name']}: " . ($direction > 0 ? '+' : '-') . rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.') . ' (now ' . rtrim(rtrim(number_format($stock, 3, '.', ''), '0'), '.') . ')' . ($notes ? " — $notes" : ''), [], $product['store_id']);
 json_out(["status" => "success", "message" => "Stock updated. Current stock: " . rtrim(rtrim(number_format($stock, 3, '.', ''), '0'), '.'), "stock_qty" => $stock, "expense_id" => $expenseId]);

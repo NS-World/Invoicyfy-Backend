@@ -16,6 +16,12 @@ function build_order(array $d, array $user): array
     }
     $items = prepare_items($d['items'] ?? []);
     [$lines, $totals] = gst_calculate($items, (bool) $party['is_interstate']);
+    // Discount above the role limit needs a manager PIN (same rule as bills).
+    $approver = check_discount_approval($user, $storeId, manual_discount_percent($items), str_field($d, 'approval_pin'));
+    $tableNo = str_field($d, 'table_no');
+    if ($tableNo !== null && mb_strlen($tableNo) > 20) {
+        fail('Table number is too long');
+    }
 
     $head = [
         'customer_id' => $party['customer_id'],
@@ -28,6 +34,12 @@ function build_order(array $d, array $user): array
         'is_interstate' => $party['is_interstate'],
         'notes' => str_field($d, 'notes'),
     ] + pick($totals, ['subtotal', 'discount_amount', 'taxable_amount', 'tax_amount', 'round_off', 'total_amount']);
+    if ($tableNo !== null || array_key_exists('table_no', $d)) {
+        $head['table_no'] = $tableNo;
+    }
+    if ($approver) {
+        log_activity('discount.approved', 'order', null, 'Order discount approved by ' . db_value('SELECT name FROM users WHERE user_id = ?', [$approver]), [], $storeId);
+    }
 
     return [$store, $head, $lines];
 }

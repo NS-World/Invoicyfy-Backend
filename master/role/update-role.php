@@ -26,4 +26,8 @@ if (strcasecmp($existing, 'Admin') === 0) {
     $perms = array_key_exists('permissions', $data) ? guard_role_permissions($me, $id, (array) $data['permissions']) : null;
     db_query("UPDATE roles SET role_name = ?, permissions = COALESCE(?, permissions) WHERE role_id = ?", [$name, $perms === null ? null : json_encode($perms), $id]);
 }
+if (($limit = role_discount_input($me, $data)) && strcasecmp($existing, 'Admin') !== 0) {
+    update_row('roles', 'role_id', $id, $limit);
+}
+log_activity('role.update', 'role', $id, "Updated role $name" . (isset($limit['max_discount_percent']) ? " (discount limit {$limit['max_discount_percent']}%)" : ''));
 json_out(["status" => "success", "message" => "Role updated successfully"]);

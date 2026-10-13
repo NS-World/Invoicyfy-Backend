@@ -16,7 +16,9 @@ $used = db_value("SELECT 1 FROM invoice_items WHERE product_id = ? LIMIT 1", [$i
 if ($used) {
     // Keep history intact: deactivate instead of deleting.
     db_query("UPDATE products SET status = 'Inactive' WHERE product_id = ?", [$id]);
+    log_activity('product.deactivate', 'product', $id, "Product {$product['name']} marked Inactive", [], $product['store_id']);
     json_out(["status" => "success", "message" => "Product is used in bills, so it was marked Inactive instead of deleted"]);
 }
 db_query("DELETE FROM products WHERE product_id = ?", [$id]);
+log_activity('product.delete', 'product', $id, "Deleted product {$product['name']}", [], $product['store_id']);
 json_out(["status" => "success", "message" => "Product deleted successfully"]);

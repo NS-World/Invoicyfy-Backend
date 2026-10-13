@@ -19,4 +19,14 @@ product_duplicate_check($p, $id);
 // Stock is changed only through inventory adjustments so every change is audited.
 $set = implode(', ', array_map(fn($c) => "$c = ?", array_keys($p)));
 db_query("UPDATE products SET $set WHERE product_id = ?", array_merge(array_values($p), [$id]));
+$changes = [];
+foreach (['price' => 'price', 'cost_price' => 'cost', 'gst_rate' => 'GST %', 'name' => 'name', 'status' => 'status'] as $k => $label) {
+    if (array_key_exists($k, $p) && (string) $p[$k] !== (string) $existing[$k] && !(is_numeric($p[$k]) && (float) $p[$k] == (float) $existing[$k])) {
+        $changes[] = "$label {$existing[$k]} → {$p[$k]}";
+    }
+}
+if ($changes) {
+    log_activity(isset($p['price']) && (float) $p['price'] != (float) $existing['price'] ? 'product.price' : 'product.update', 'product', $id,
+        "Product {$existing['name']}: " . implode(', ', $changes), [], $existing['store_id']);
+}
 json_out(["status" => "success", "message" => "Product updated successfully"]);

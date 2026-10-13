@@ -12,7 +12,7 @@ if (!$id || !$status) {
 if (!in_array($status, ['Pending', 'Approved', 'Cancelled'], true)) {
     fail('Status can be Pending, Approved or Cancelled. Orders become Invoiced when you generate an invoice.');
 }
-$order = db_one("SELECT order_id, status, store_id FROM orders WHERE order_id = ?", [$id]);
+$order = db_one("SELECT order_id, order_number, status, store_id FROM orders WHERE order_id = ?", [$id]);
 if (!$order) {
     fail('Order not found', 404);
 }
@@ -21,4 +21,5 @@ if ($order['status'] === 'Invoiced') {
     fail('This order is already invoiced. Cancel the invoice first to change it.', 409);
 }
 db_query("UPDATE orders SET status = ? WHERE order_id = ?", [$status, $id]);
+log_activity('order.status', 'order', $id, "Order {$order['order_number']}: {$order['status']} → $status", [], $order['store_id']);
 json_out(["status" => "success", "message" => "Order status updated successfully", "order_id" => $id, "new_status" => $status]);

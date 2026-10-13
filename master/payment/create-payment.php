@@ -13,6 +13,7 @@ if (!$invoice) {
 assert_store_access($user, $invoice['store_id']);
 $paymentId = record_payment($invoice, $user, $d);
 $pdo->commit();
+log_activity('payment.add', 'invoice', $id, 'Payment ' . rupees($d['amount'] ?? 0) . ' (' . ($d['payment_method'] ?? 'Cash') . ") on bill {$invoice['invoice_number']}", [], $invoice['store_id']);
 
 json_out([
     "status" => "success",

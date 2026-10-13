@@ -19,4 +19,5 @@ if ($id === (int) $me['user_id'] && (!$p['is_active'] || $p['role_id'] !== (int)
 user_duplicate_check($p, $id);
 $set = implode(', ', array_map(fn($c) => "$c = ?", array_keys($p)));
 db_query("UPDATE users SET $set WHERE user_id = ?", array_merge(array_values($p), [$id]));
+log_activity('user.update', 'user', $id, "Updated user {$p['name']} ({$p['email']})" . (array_key_exists('password', $p) ? ', password changed' : '') . (array_key_exists('approval_pin', $p) ? ', approval PIN ' . ($p['approval_pin'] ? 'set' : 'removed') : ''), [], $p['store_id']);
 json_out(["status" => "success", "message" => "User updated successfully"]);

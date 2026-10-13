@@ -13,7 +13,12 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/channels.php';
 set_exception_handler(null);
 
+require_once __DIR__ . '/../lib/automation.php';
+
 $deadline = microtime(true) + 50;
+// Daily automatic messages (summary, low stock, birthdays, reminders) when their time has come.
+$jobs = run_scheduled_jobs(microtime(true) + 20);
+db_query("REPLACE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('cron', 0, CURDATE(), NOW(), 'ok')");
 $released = release_stuck_recipients();
 $sent = 0;
 $ids = array_map('intval', array_column(db_all("SELECT campaign_id FROM campaigns WHERE status = 'Sending' ORDER BY campaign_id"), 'campaign_id'));
@@ -26,4 +31,4 @@ foreach ($ids as $id) {
         }
     }
 }
-echo date('Y-m-d H:i:s') . " campaigns=" . count($ids) . " processed=$sent released=$released" . PHP_EOL;
+echo date('Y-m-d H:i:s') . " campaigns=" . count($ids) . " processed=$sent released=$released" . ($jobs ? ' jobs: ' . implode(' | ', $jobs) : '') . PHP_EOL;

@@ -15,6 +15,7 @@ if ($id === (int) $me['user_id']) {
     fail('You cannot delete your own account', 409);
 }
 $hasHistory = db_value("SELECT 1 FROM invoices WHERE user_id = ? LIMIT 1", [$id]) || db_value("SELECT 1 FROM orders WHERE user_id = ? LIMIT 1", [$id]);
+log_activity('user.delete', 'user', $id, ($hasHistory ? 'Disabled' : 'Deleted') . ' user ' . ($target['name'] ?? "#$id"), [], $target['store_id'] ?? null);
 if ($hasHistory) {
     db_query("UPDATE users SET is_active = 0 WHERE user_id = ?", [$id]);
     json_out(["status" => "success", "message" => "User has billing history, so the account was disabled instead of deleted"]);
