@@ -59,6 +59,13 @@ $hsn = f2(db_all(
 ), $money);
 
 $inputTax = (float) db_value("SELECT COALESCE(SUM(e.tax_amount),0) FROM expenses e WHERE e.expense_date BETWEEN ? AND ? $se", array_merge([$from, $to], $sep));
+// V4: GST paid on purchase bills is input tax credit too.
+$purchaseTax = 0.0;
+if (v4_ready()) {
+    [$sq, $sqp] = store_filter($user, 'p');
+    $purchaseTax = (float) db_value("SELECT COALESCE(SUM(p.tax_amount),0) FROM purchases p WHERE p.status <> 'Cancelled' AND p.purchase_date BETWEEN ? AND ? $sq", array_merge([$from, $to], $sqp));
+    $inputTax += $purchaseTax;
+}
 $cancelled = (int) db_value("SELECT COALESCE(SUM(s.bills),0) FROM $S s WHERE s.status = 'Cancelled' AND s.day BETWEEN ? AND ?$ss", $range);
 
 json_out([
@@ -66,6 +73,7 @@ json_out([
     "range" => ["from" => $from, "to" => $to],
     "totals" => $totals + ["cancelled_invoices" => $cancelled],
     "input_tax_credit" => round($inputTax, 2),
+    "input_tax_purchases" => round($purchaseTax, 2),
     "net_gst_payable" => round(max(0, $totals['tax_amount'] - $inputTax), 2),
     "by_rate" => $byRate,
     "b2b" => $b2b,

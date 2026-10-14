@@ -132,7 +132,7 @@ function prepare_items(array $rawItems): array
             'item_note' => str_field($raw, 'item_note'),
         ];
     }
-    return $items;
+    return apply_recipe_costs($items); // V4: items made from a recipe cost what their ingredients cost
 }
 
 /** Compute line-wise tax and document totals. */

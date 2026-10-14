@@ -22,7 +22,9 @@ function product_payload(array $d, array $user): array
         fail('status must be Active or Inactive');
     }
     ensure_category(str_field($d, 'category'), str_field($d, 'unit', 'pcs'));
-    return [
+    // V4: raw material (milk, cone...) used in recipes; hidden from the billing screen's item grid.
+    $v4 = array_key_exists('is_ingredient', $d) && v4_ready() ? ['is_ingredient' => bool_field($d, 'is_ingredient') ? 1 : 0] : [];
+    return $v4 + [
         'store_id' => write_store($user, $d['store_id'] ?? null),
         'name' => $name,
         'sku' => str_field($d, 'sku'),

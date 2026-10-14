@@ -17,6 +17,7 @@ $quote = quote_bill($store, $party, $items, [
     'coupon_code' => str_field($d, 'coupon_code'),
     'redeem_points' => num_field($d, 'redeem_points', 0),
     'round_off' => bool_field($d, 'round_off', true),
+    'no_offers' => bool_field($d, 'no_offers'),
 ]);
 $limit = role_discount_limit($user);
 
@@ -24,6 +25,8 @@ json_out(['status' => 'success', 'data' => [
     'totals' => $quote['totals'],
     'coupon' => $quote['coupon'],
     'loyalty' => $quote['loyalty'],
+    'offers' => $quote['offers'],
+    'offer_discount' => $quote['offer_discount'],
     'manual_discount_percent' => $quote['manual_discount_percent'],
     'discount_limit' => $limit,
     'approval_required' => $limit !== null && $quote['manual_discount_percent'] > $limit + 0.001,

@@ -6,7 +6,11 @@ allow_methods('GET');
 $user = require_auth();
 
 $tables = [];
+$existing = array_flip(backup_existing_tables());
 foreach (BACKUP_TABLES as $table => $cfg) {
+    if (!isset($existing[$table])) {
+        continue;
+    }
     if (!empty($cfg['admin']) && !is_admin($user)) {
         continue;
     }

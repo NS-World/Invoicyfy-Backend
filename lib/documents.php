@@ -6,7 +6,7 @@
 
 const ORDER_STATUSES = ['Pending', 'Approved', 'Invoiced', 'Cancelled'];
 const ORDER_TYPES = ['Counter', 'Takeaway', 'Delivery', 'Dine-in', 'Online', 'B2B'];
-const PAYMENT_METHODS = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Cheque', 'Wallet', 'Credit', 'Other'];
+const PAYMENT_METHODS = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Cheque', 'Wallet', 'Credit', 'Other', 'Online Platform'];
 
 const DOC_FLOATS = ['subtotal', 'discount_amount', 'taxable_amount', 'cgst_amount', 'sgst_amount', 'igst_amount',
     'tax_amount', 'round_off', 'total_amount', 'amount_paid', 'balance_due', 'quantity', 'unit_price', 'cost_price',
@@ -149,7 +149,8 @@ function create_invoice_record(array $store, array $user, array $head, array $li
     [$number, $fy] = next_invoice_number($store, $head['invoice_type'], $head['invoice_date']);
 
     // V3 columns are only written when used, so plain bills keep working even before "Update database" is pressed.
-    foreach (['table_no', 'coupon_code', 'coupon_discount', 'loyalty_points_redeemed', 'loyalty_discount', 'loyalty_points_earned', 'approved_by', 'client_uuid', 'offline_at'] as $k) {
+    foreach (['table_no', 'coupon_code', 'coupon_discount', 'loyalty_points_redeemed', 'loyalty_discount', 'loyalty_points_earned', 'approved_by', 'client_uuid', 'offline_at',
+              'offer_discount', 'offer_names', 'sales_channel', 'channel_order_id', 'channel_commission'] as $k) {
         if (array_key_exists($k, $head) && ($head[$k] === null || $head[$k] === '' || $head[$k] === 0 || $head[$k] === 0.0)) {
             unset($head[$k]);
         }
@@ -165,6 +166,7 @@ function create_invoice_record(array $store, array $user, array $head, array $li
         'invoice_date', 'due_date', 'order_type', 'notes', 'terms', 'eway_bill_no', 'vehicle_no',
         'table_no', 'coupon_code', 'coupon_discount', 'loyalty_points_redeemed', 'loyalty_discount', 'loyalty_points_earned',
         'approved_by', 'client_uuid', 'offline_at',
+        'offer_discount', 'offer_names', 'sales_channel', 'channel_order_id', 'channel_commission',
     ]) + pick($totals, [
         'subtotal', 'discount_amount', 'taxable_amount', 'cgst_amount', 'sgst_amount', 'igst_amount', 'tax_amount',
         'round_off', 'total_amount',
@@ -182,6 +184,7 @@ function create_invoice_record(array $store, array $user, array $head, array $li
         ]));
         if ($l['product_id']) {
             move_stock((int) $l['product_id'], -$l['quantity'], 'sale', 'invoice', $invoiceId, $number, (int) $user['user_id']);
+            consume_recipe((int) $l['product_id'], (float) $l['quantity'], $invoiceId, $number, (int) $user['user_id']);
         }
     }
     stats_touch($store['store_id'], $head['invoice_date'] ?? date('Y-m-d'));

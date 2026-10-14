@@ -44,6 +44,14 @@ if ($unitCost !== null) {
         db_query("UPDATE products SET cost_price = ? WHERE product_id = ?", [$unitCost, $productId]);
     }
 }
+// V4: stock received with a batch number / expiry date is tracked batch-wise (used first-expiry-first).
+if ($type === 'purchase') {
+    $batchNo = str_field($d, 'batch_no');
+    if ($batchNo !== null && mb_strlen($batchNo) > 50) {
+        fail('Batch number is too long');
+    }
+    add_batch($productId, $product['store_id'] !== null ? (int) $product['store_id'] : null, $qty, $batchNo, date_field($d, 'expiry_date'), $unitCost, null);
+}
 $expenseId = null;
 if ($type === 'purchase' && bool_field($d, 'record_expense') && $unitCost) {
     $expenseId = insert_row('expenses', [

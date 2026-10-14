@@ -27,6 +27,11 @@ if (claim_job('stats_recheck', 0, date('Y-m-d'))) {
     }
 }
 stats_sync();
+// V4: nightly backup (server copy + Google Drive).
+require_once __DIR__ . '/../lib/drive.php';
+if (backup_due()) {
+    $jobs[] = run_backup()['message'];
+}
 db_query("REPLACE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('cron', 0, CURDATE(), NOW(), 'ok')");
 $released = release_stuck_recipients();
 $sent = 0;

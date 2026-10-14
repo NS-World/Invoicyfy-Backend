@@ -16,4 +16,10 @@ release_stuck_recipients();
 foreach (array_column(db_all("SELECT campaign_id FROM campaigns WHERE status = 'Sending' AND channel = 'api' ORDER BY campaign_id LIMIT 3"), 'campaign_id') as $id) {
     process_campaign((int) $id, 10, microtime(true) + 10);
 }
+// V4: nightly backup (server copy + Google Drive) once a day after its time, after this answer is sent.
+require_once __DIR__ . '/../lib/drive.php';
+if (backup_due()) {
+    after_response(fn() => run_backup(), true);
+    $log[] = 'backup started';
+}
 json_out(['status' => 'success', 'ran' => $log]);

@@ -175,6 +175,11 @@ function job_summary(array $store, array $auto, string $date, ?int $userId = nul
 function job_low_stock(array $store, array $auto, ?int $userId = null): string
 {
     $text = low_stock_text($store);
+    // V4: batches about to expire go in the same alert.
+    $expiring = expiry_text($store, (int) pos_settings($store)['expiry_alert_days']);
+    if ($expiring) {
+        $text = $text ? "$text\n\n$expiring" : $expiring;
+    }
     if (!$text) {
         return 'No item is low on stock';
     }

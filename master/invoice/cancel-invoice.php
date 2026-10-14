@@ -28,6 +28,7 @@ stats_touch_invoice($id); // the bill's day and the days of its payments
 foreach (db_all("SELECT product_id, quantity FROM invoice_items WHERE invoice_id = ? AND product_id IS NOT NULL", [$id]) as $it) {
     move_stock((int) $it['product_id'], (float) $it['quantity'], 'cancel', 'invoice', $id, "Cancelled {$inv['invoice_number']}", (int) $user['user_id']);
 }
+return_recipe_stock($id, $inv['invoice_number'], (int) $user['user_id']); // V4: ingredients used by recipes
 if ($inv['order_id']) {
     db_query("UPDATE orders SET status = 'Approved' WHERE order_id = ? AND status = 'Invoiced'", [$inv['order_id']]);
 }

@@ -58,6 +58,7 @@ require_once __DIR__ . '/settings.php';
 require_once __DIR__ . '/billing.php';
 require_once __DIR__ . '/query.php';
 require_once __DIR__ . '/stats.php';
+require_once __DIR__ . '/v4.php';
 
 /* ----------------------------------------------------------------------------
  * Request / response helpers
@@ -294,7 +295,7 @@ function get_store(int $storeId): array
  * Adjust stock for a product and record the movement. $qty is signed (+in / -out).
  * Products with track_inventory = 0 are ignored.
  */
-function move_stock(int $productId, float $qty, string $type, ?string $refType, ?int $refId, ?string $notes, ?int $userId): void
+function move_stock(int $productId, float $qty, string $type, ?string $refType, ?int $refId, ?string $notes, ?int $userId, ?int $batchId = null): void
 {
     if ($qty == 0.0) {
         return;
@@ -310,4 +311,10 @@ function move_stock(int $productId, float $qty, string $type, ?string $refType, 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [$productId, $product['store_id'], $type, $qty, $balance, $refType, $refId, $notes, $userId]
     );
+    // V4 batches: stock out uses the batch expiring first; stock back (cancelled bill / return) refills them.
+    if ($qty < 0) {
+        batches_take($productId, -$qty, $batchId);
+    } elseif (in_array($type, ['cancel', 'return'], true)) {
+        batches_return($productId, $qty);
+    }
 }

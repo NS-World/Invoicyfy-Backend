@@ -259,6 +259,11 @@ function quote_bill(array $store, array $party, array $items, array $opts = []):
 {
     $interstate = (bool) $party['is_interstate'];
     $lock = !empty($opts['lock']);
+    // V4: combo / happy-hour offers running now (or when an offline bill was made) come off first.
+    $original = $items;
+    [$items, $offers, $offerDiscount] = empty($opts['no_offers'])
+        ? apply_offers((int) $store['store_id'], $items, $opts['at'] ?? null)
+        : [$items, [], 0.0];
     $customerId = $party['customer_id'] ? (int) $party['customer_id'] : null;
     [, $base] = gst_calculate($items, $interstate, false);
     $payable = round($base['taxable_amount'] + $base['tax_amount'], 2);
@@ -303,6 +308,8 @@ function quote_bill(array $store, array $party, array $items, array $opts = []):
     return [
         'lines' => $lines,
         'totals' => $totals,
+        'offers' => $offers,
+        'offer_discount' => $offerDiscount,
         'coupon' => $coupon ? ['coupon_id' => (int) $coupon['coupon_id'], 'code' => $coupon['code'], 'description' => $coupon['description'], 'discount' => $couponDiscount] : null,
         'loyalty' => [
             'enabled' => (bool) $ls['enabled'],
@@ -316,7 +323,7 @@ function quote_bill(array $store, array $party, array $items, array $opts = []):
                 ? min((float) $balance, points_round(round(($payable - $couponDiscount) * (float) $ls['max_redeem_percent'] / 100, 2) / (float) $ls['point_value']))
                 : 0,
         ],
-        'manual_discount_percent' => manual_discount_percent($items),
+        'manual_discount_percent' => manual_discount_percent($original),
     ];
 }
 

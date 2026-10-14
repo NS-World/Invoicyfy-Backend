@@ -27,7 +27,25 @@ const BACKUP_TABLES = [
     'loyalty_ledger' => ['label' => 'Loyalty points history', 'pk' => 'entry_id'],
     'cash_sessions' => ['label' => 'Day close (cash register)', 'pk' => 'session_id', 'exclude' => ['open_lock']],
     'cash_movements' => ['label' => 'Cash pay in / out', 'pk' => 'movement_id'],
+    // V4
+    'suppliers' => ['label' => 'Suppliers', 'pk' => 'supplier_id', 'unique' => [['store_id', 'name']]],
+    'purchases' => ['label' => 'Purchase bills', 'pk' => 'purchase_id', 'match' => ['supplier_id', 'bill_no', 'purchase_date', 'total_amount']],
+    'purchase_items' => ['label' => 'Purchase items', 'pk' => 'purchase_item_id', 'match' => ['purchase_id', 'product_name', 'quantity', 'unit_cost']],
+    'supplier_payments' => ['label' => 'Supplier payments', 'pk' => 'payment_id', 'match' => ['supplier_id', 'amount', 'payment_date', 'payment_method']],
+    'recipe_items' => ['label' => 'Recipes', 'pk' => 'recipe_item_id', 'unique' => [['product_id', 'ingredient_id']]],
+    'stock_batches' => ['label' => 'Stock batches (expiry)', 'pk' => 'batch_id'],
+    'offers' => ['label' => 'Combo / happy-hour offers', 'pk' => 'offer_id'],
 ];
+
+/** Tables that exist in this database (V4 tables appear after "Update database"). */
+function backup_existing_tables(): array
+{
+    static $have = null;
+    if ($have === null) {
+        $have = array_flip(array_map(fn($r) => (string) reset($r), db_all('SHOW TABLES')));
+    }
+    return array_values(array_filter(array_keys(BACKUP_TABLES), fn($t) => isset($have[$t])));
+}
 
 /** Column definitions for a table from the schema (name => SQL definition). */
 function backup_columns(string $table): array

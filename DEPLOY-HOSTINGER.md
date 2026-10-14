@@ -209,6 +209,43 @@ chahiye. App ek baar online khulne ke baad internet ke bina bhi khul jaati hai (
 
 **Demo & help:** upar **Demo & help** (topi wala icon) dabao — har screen ka step-by-step demo.
 
+## Version 4 — naye features ka setup (ek baar)
+
+Update ke baad **Update database** button zaroor dabao (naye tables: suppliers, purchases, recipes,
+batches, combo offers; aur bills me online platform / offer columns). Purana data aur screens waise hi chalte hain.
+Manager role ko *Suppliers & Purchases* apne aap mil jaata hai; Staff ko chahiye to Roles me tick karo.
+
+1. **Suppliers → New supplier** — naam, mobile, GSTIN, purana baaki (opening balance).
+2. **Purchases → New purchase** — supplier ka bill: items, rate, GST, batch / expiry. Save karte hi stock
+   badhta hai, cost price update hota hai, GST *input credit* me judta hai (GST summary report), aur baaki
+   rakam supplier ke khaate me. Supplier ko payment: Suppliers → ₹ icon.
+3. **Products** — doodh, cone, topping jaise kachcha maal product banao aur *Raw material* on karo
+   (Quick Bill me nahi dikhega). **Recipes & Cost** me sundae / shake ki recipe (1 piece me kitna lagta hai).
+   Bill hote hi ingredients stock se kam, aur report me asli cost / profit.
+4. **Expiry & Wastage** — batch ki expiry, jaldi expire hone wala maal, aur pighla / kharab maal ki entry
+   (loss report). Counter settings me *Expiry alert (days before)*; low-stock automatic message me bhi aata hai.
+5. **Combo & Happy Hour** — "2 Scoop + 1 Shake = ₹199" ya "3–5 baje 10% off". Quick Bill me apne aap lagta
+   hai (cashier ki discount limit me nahi ginta), ek bill ke liye *Apply offers* off kar sakte ho.
+6. **Counter & Printer → Counter**:
+   * *Online platforms* — Swiggy / Zomato ka commission %. Quick Bill me *Sold through* → platform + order no.
+     Saare orders **Online orders** screen par: commission, payout aaya ya baaki (*Payout received*).
+   * *Send the bill to the customer automatically* — bill save hote hi customer ko bill ka link
+     (WhatsApp API / SMS / Email — Offers & Messages → Setup se). Link phone par khulta hai, PDF save ho sakta hai.
+     API na ho to bill screen par **Send bill link (WhatsApp)** button se apne phone ka WhatsApp khulta hai.
+7. **Owner's view (phone)** — aaj ki sale, cash, top items, udhaar, expiry, supplier baaki — phone par ek nazar me.
+8. **Staff report** — kis cashier ne kitni sale, discount, cancel; shift-wise cash difference.
+9. **GSTR-1 file** — mahina chuno → *Prepare* → JSON (GST portal / offline tool) aur Excel. Upload se pehle
+   offline tool me khol ke check karo; credit note aur Swiggy/Zomato 9(5) wali sale CA se confirm karo.
+10. **Backup & Restore → Automatic backup every night** (sirf Admin):
+    * Google Cloud Console → naya project → *Google Drive API* enable → *OAuth consent screen* (External,
+      apna email test user) → *Credentials → Create OAuth client ID → Web application*.
+    * *Authorized redirect URI* me wahi URL daalo jo screen par dikhta hai
+      (`https://billing.scoopiez.in/api/master/backup/drive-callback.php`).
+    * Client ID + Client secret app me save karo → **Connect Google Drive** → Allow.
+    * *Backup every night* on, time (jaise 02:00). Cron job (upar wala, har minute) laga ho to raat ko apne aap;
+      warna jab app pehli baar khule tab us din ka backup ho jaata hai.
+    * Backup file server par bhi rehti hai (`api/storage/backups`, web se band) aur wahi se download / restore hoti hai.
+
 ## Speed (API fast rakhne ke liye)
 
 * Naya version upload karke **Update database** zaroor dabao: naye indexes + report summary tables bante hain.
@@ -223,8 +260,8 @@ chahiye. App ek baar online khulne ke baad internet ke bina bhi khul jaati hai (
 
 ## Backup ki aadat
 
-* App: **Backup & Restore → Download full backup** hafte me kam se kam ek baar. File ko Google Drive
-  ya pen drive me rakho.
+* App: **Backup & Restore → Automatic backup every night** + Google Drive (Version 4) on rakho.
+  Saath me **Download full backup** (Excel) mahine me ek baar pen drive me.
 * Hostinger: **Files → Backups** me daily/weekly server backups bhi milte hain.
 
 ## Problem aaye to

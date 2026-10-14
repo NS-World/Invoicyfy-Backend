@@ -9,6 +9,12 @@ const POS_DEFAULTS = [
     'require_day_open' => false,  // block billing until the day (cash register) is opened
     'table_count' => 0,           // 0 = no table numbers; e.g. 12 shows table buttons 1..12
     'upi_qr_on_screen' => true,   // show a UPI QR with the bill amount when "UPI" is chosen
+    // V4
+    'auto_send_bill' => false,    // send the bill link to the customer (WhatsApp API / SMS / Email) when a bill is saved
+    'bill_channels' => ['whatsapp'],
+    'bill_message' => "Thank you for visiting {shop}! Your bill {bill_no} of Rs {amount} dated {date}: {link}",
+    'online_platforms' => [['name' => 'Swiggy', 'commission' => 25.0], ['name' => 'Zomato', 'commission' => 25.0]],
+    'expiry_alert_days' => 3,     // batches expiring within these days show on the dashboard and in the stock alert
 ];
 
 const LOYALTY_DEFAULTS = [
@@ -131,7 +137,41 @@ function clean_pos_settings(array $in, array $current): array
         'require_day_open' => (bool) $s['require_day_open'],
         'table_count' => (int) setting_num($s['table_count'], 0, 200, 'Number of tables'),
         'upi_qr_on_screen' => (bool) $s['upi_qr_on_screen'],
+        'auto_send_bill' => (bool) $s['auto_send_bill'],
+        'bill_channels' => setting_channels($s['bill_channels']),
+        'bill_message' => setting_text($s['bill_message'], 500, 'Bill message', true),
+        'online_platforms' => clean_online_platforms($s['online_platforms']),
+        'expiry_alert_days' => (int) setting_num($s['expiry_alert_days'], 0, 60, 'Expiry alert days'),
     ];
+}
+
+/** [{name, commission %}] — up to 8 platforms, unique names. */
+function clean_online_platforms($raw): array
+{
+    $out = [];
+    $seen = [];
+    foreach (is_array($raw) ? $raw : [] as $p) {
+        if (!is_array($p)) {
+            continue;
+        }
+        $name = setting_text($p['name'] ?? '', 30, 'Platform name');
+        if ($name === '') {
+            continue;
+        }
+        if (!preg_match('/^[\p{L}\p{N} .&_-]+$/u', $name)) {
+            fail("Platform name \"$name\" can have letters, numbers, space . & _ - only");
+        }
+        $key = mb_strtolower($name);
+        if (isset($seen[$key])) {
+            fail("Platform \"$name\" is added twice");
+        }
+        $seen[$key] = true;
+        $out[] = ['name' => $name, 'commission' => setting_num($p['commission'] ?? 0, 0, 60, "Commission % for $name")];
+    }
+    if (count($out) > 8) {
+        fail('Add at most 8 online platforms');
+    }
+    return $out;
 }
 
 function clean_loyalty_settings(array $in, array $current): array

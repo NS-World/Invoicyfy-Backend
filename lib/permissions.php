@@ -22,12 +22,18 @@ const PERMISSION_MODULES = [
     'cash' => ['label' => 'Day Close / Cash Register', 'actions' => ['view', 'add', 'edit']],
     'loyalty' => ['label' => 'Coupons & Loyalty', 'actions' => ['view', 'add', 'edit', 'delete']],
     'activity' => ['label' => 'Activity Log', 'actions' => ['view']],
+    'purchases' => ['label' => 'Suppliers & Purchases', 'actions' => ['view', 'add', 'edit', 'delete']],
 ];
 
 /** Modules added in V3, given to existing roles once so nobody loses access to the new screens after an upgrade. */
 const V3_ROLE_DEFAULTS = [
     'Manager' => ['cash' => ['view', 'add', 'edit'], 'loyalty' => ['view', 'add', 'edit', 'delete'], 'activity' => ['view']],
     'Staff' => ['cash' => ['view', 'add', 'edit'], 'loyalty' => ['view']],
+];
+
+/** Modules added in V4, given to existing roles once (same idea as V3_ROLE_DEFAULTS). */
+const V4_ROLE_DEFAULTS = [
+    'Manager' => ['purchases' => ['view', 'add', 'edit', 'delete']],
 ];
 
 /**
@@ -51,6 +57,12 @@ const ENDPOINT_PERMISSION_OVERRIDES = [
     'automation/update-automation-settings' => ['settings', 'edit'],
     'automation/run-now' => ['settings', 'edit'],
     'automation/job-history' => ['settings', 'view'],
+    // V4
+    'offer/active-offers' => ['invoices', 'add'],
+    'online/mark-settled' => ['invoices', 'edit'],
+    'invoice/send-bill' => ['invoices', 'view'],
+    'backup/update-drive-settings' => ['backup', 'add'],
+    'backup/drive-disconnect' => ['backup', 'add'],
 ];
 
 const DEFAULT_ROLE_PERMISSIONS = [
@@ -59,6 +71,7 @@ const DEFAULT_ROLE_PERMISSIONS = [
         'payments' => ['view', 'add', 'delete'], 'customers' => ['view', 'add', 'edit', 'delete'], 'products' => ['view', 'add', 'edit', 'delete'],
         'inventory' => ['view', 'add'], 'expenses' => ['view', 'add', 'edit', 'delete'], 'reports' => ['view'], 'settings' => ['view', 'edit'],
         'marketing' => ['view', 'add', 'edit'], 'cash' => ['view', 'add', 'edit'], 'loyalty' => ['view', 'add', 'edit', 'delete'], 'activity' => ['view'],
+        'purchases' => ['view', 'add', 'edit', 'delete'],
     ],
     'Staff' => [
         'dashboard' => ['view'], 'orders' => ['view', 'add', 'edit'], 'invoices' => ['view', 'add'], 'payments' => ['view', 'add'],
@@ -135,6 +148,8 @@ function endpoint_permission(string $script, string $method): ?array
         'campaign' => 'marketing', 'backup' => 'backup',
         'cash' => 'cash', 'coupon' => 'loyalty', 'loyalty' => 'loyalty', 'activity' => 'activity',
         'credit' => 'payments', 'automation' => 'settings', 'pos' => 'settings', 'held' => 'invoices',
+        'supplier' => 'purchases', 'purchase' => 'purchases', 'recipe' => 'products', 'batch' => 'inventory',
+        'offer' => 'loyalty', 'online' => 'invoices',
     ][$folder] ?? null;
     if (!$module) {
         return null;

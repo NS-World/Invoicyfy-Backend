@@ -14,7 +14,7 @@ json_out([
     "data" => [
         "gst_rates" => GST_RATES,
         "states" => $states,
-        "payment_methods" => PAYMENT_METHODS,
+        "payment_methods" => array_values(array_diff(PAYMENT_METHODS, ['Online Platform'])), // set only by online platform bills
         "order_types" => ORDER_TYPES,
         "order_statuses" => ORDER_STATUSES,
         "units" => ['pcs', 'nos', 'kg', 'g', 'ltr', 'ml', 'box', 'pack', 'dozen', 'mtr', 'sqft', 'set', 'pair', 'hrs', 'service'],

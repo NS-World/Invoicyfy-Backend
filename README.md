@@ -120,6 +120,33 @@ Never run it on your live database.
   by the open app): night summary, low stock, birthday/anniversary wish with a one-time coupon, udhaar reminders.
 * Everything important is written to `activity_log` (bills, cancels, deletes, price changes, approvals, logins).
 
+## Version 4 rules
+
+* **Purchases** (`master/purchase/*`, `master/supplier/*`): a purchase bill adds stock (`move_stock` type
+  `purchase`), updates the cost price (taxable value per unit) and creates a batch when a batch no. / expiry is
+  given. GST on purchases counts as input tax credit in `reports/gst-summary.php`. Supplier balance =
+  opening balance + purchase bills − payments; a payment without `purchase_id` clears the oldest bills first.
+  Purchase bills with payments cannot be cancelled until the payments are deleted.
+* **Recipes** (`recipe_items`): selling a product with a recipe also takes its ingredients out of stock (type
+  `recipe`, linked to the bill) and the bill line cost = recipe cost; cancelling the bill puts exactly those
+  ingredients back. One level only (an ingredient cannot have its own recipe).
+* **Batches** (`stock_batches`): stock going out is taken from the batch expiring first; stock coming back
+  refills the used batches. Wastage (`master/inventory/add-wastage.php`) records the loss at cost.
+* **Offers** (`offers`): happy hour (% off on all / categories / products, by weekday and time window, also
+  across midnight) and combos (fixed price for a set of items). Applied inside `quote_bill()` before coupons /
+  points, so `quote-bill.php` and `create-invoice.php` agree; they do not count towards the cashier's
+  discount limit. `no_offers: true` switches them off for one bill (offline bills are synced with it).
+* **Online platforms** (counter setting `online_platforms`): `create-invoice.php` with `sales_channel` +
+  `channel_order_id` (unique per platform) records the commission estimate and a payment "Online Platform";
+  `master/online/mark-settled.php` stores the actual payout.
+* **Bill link**: `bill.php?i=&s=` (HMAC signed, no login) shows one bill. With the counter setting
+  `auto_send_bill` the link is queued as a message (one "Bills sent <date>" campaign per day) and sent after
+  the response; `master/invoice/send-bill.php` returns the link + text for click-to-chat.
+* **Reports**: `reports/staff.php`, `reports/dashboard/owner.php`, `reports/gstr1.php` (GSTR-1 JSON + sheets).
+* **Automatic backup** (`lib/drive.php`): the whole database as `storage/backups/invoicyfy-backup-*.json.gz`
+  (keyset paging, low memory), uploaded to Google Drive (OAuth, scope `drive.file`, resumable upload) and
+  restorable from the Backup screen. Runs once a day from cron / tick after the chosen time.
+
 ## Speed on large data (lakhs of bills)
 
 Tested with 6 lakh bills, 12 lakh bill items, 5.7 lakh payments, 1.5 lakh customers (about 35 lakh rows):
@@ -163,6 +190,10 @@ All requests need `Authorization: Bearer <access_token>` except sign-in/refresh.
 | Coupons & loyalty (V3) | `master/coupon/*` (`check-coupon.php`), `master/loyalty/*` |
 | Udhaar (V3) | `master/credit/dues.php`, `customer-statement.php`, `add-payment.php` (oldest bills first), `send-reminders.php` |
 | Activity & automation (V3) | `master/activity/activity-log.php`, `master/automation/*`, `jobs/tick.php`, `auth/set-approval-pin.php` |
+| Suppliers & purchases (V4) | `master/supplier/*` (incl. `add-payment.php`, `get-supplier.php` statement), `master/purchase/*` |
+| Recipes, batches, wastage (V4) | `master/recipe/*`, `master/batch/batches.php`, `expiring.php`, `master/inventory/add-wastage.php`, `wastage.php` |
+| Offers & online orders (V4) | `master/offer/*` (`active-offers.php` for billing), `master/online/online-orders.php`, `mark-settled.php` |
+| Bill link, reports, backup (V4) | `bill.php`, `master/invoice/send-bill.php`, `reports/staff.php`, `reports/dashboard/owner.php`, `reports/gstr1.php`, `master/backup/drive-*.php`, `create-backup-now.php`, `download-backup.php` |
 
 ## Testing
 
@@ -171,6 +202,8 @@ DB_NAME=invoicyfy_test php database/migrate.php --admin-email=admin@test.com --a
 DB_NAME=invoicyfy_test php -S 127.0.0.1:8080 -t .
 php tests/api_smoke_test.php http://127.0.0.1:8080 admin@test.com Admin@1234
 php tests/api_v3_test.php http://127.0.0.1:8080 admin@test.com Admin@1234   # V3 features, fresh DB
+# V4 features, fresh DB, with the mock SMS / Google server (see the top of tests/api_v4_test.php)
+php tests/api_v4_test.php http://127.0.0.1:8085 admin@test.com Admin@1234 http://127.0.0.1:8091
 DB_NAME=invoicyfy_test php tests/stats_check.php                            # report summaries == full rebuild
 ```
 Use a throwaway database — the test creates data.

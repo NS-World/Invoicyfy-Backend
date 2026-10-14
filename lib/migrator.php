@@ -270,6 +270,24 @@ function run_migrations(PDO $pdo, string $dbName, array $opts = []): array
         }
     }
 
+    // V4: give existing roles the new Suppliers & Purchases screen once.
+    if (table_exists($pdo, $dbName, 'job_runs')) {
+        require_once __DIR__ . '/permissions.php';
+        $claim = $pdo->prepare("INSERT IGNORE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('v4_role_permissions', 0, '2000-01-01', NOW(), 'done')");
+        $claim->execute();
+        if ($claim->rowCount()) {
+            $upd = $pdo->prepare('UPDATE roles SET permissions = ? WHERE role_id = ?');
+            foreach ($pdo->query("SELECT role_id, role_name, permissions FROM roles WHERE permissions IS NOT NULL AND role_name <> 'Admin'")->fetchAll() as $r) {
+                $perms = json_decode((string) $r['permissions'], true);
+                if (!is_array($perms) || isset($perms['purchases']) || empty(V4_ROLE_DEFAULTS[$r['role_name']])) {
+                    continue;
+                }
+                $upd->execute([json_encode($perms + V4_ROLE_DEFAULTS[$r['role_name']]), $r['role_id']]);
+                $out("+ role {$r['role_name']}: access to Suppliers & Purchases");
+            }
+        }
+    }
+
     /* ---------------- Seed defaults ---------------- */
     if (!(int) $pdo->query("SELECT COUNT(*) FROM roles")->fetchColumn()) {
         $pdo->exec("INSERT INTO roles (role_name) VALUES ('Admin'), ('Manager'), ('Staff')");
