@@ -414,5 +414,22 @@ check('disconnect Drive', $c === 200 && !($r['data']['connected'] ?? true), $r);
 [, $r] = call('GET', '/master/backup/tables.php');
 check('Backup screen lists the new tables', in_array('suppliers', array_column($r['data']['tables'] ?? [], 'table'), true), $r);
 
+echo "Inventory lists every product (tracked or not)\n";
+[, $r] = call('GET', '/master/inventory/stock.php?limit=200');
+$names = array_column($r['data'] ?? [], 'track_inventory', 'name');
+check('untracked products are listed in inventory', array_key_exists('Vanilla Scoop', $names) && $names['Vanilla Scoop'] === 0 && ($r['summary']['untracked'] ?? 0) >= 3, $r['summary'] ?? $r);
+[, $r] = call('GET', '/master/inventory/stock.php?filter=untracked');
+check('filter: not tracked', ($r['total'] ?? 0) >= 3 && !in_array(1, array_column($r['data'], 'track_inventory'), true), $r['total'] ?? $r);
+[$c, $r] = call('POST', '/master/inventory/set-tracking.php', ['product_ids' => [$scoop], 'track' => true, 'opening_stock' => 25]);
+check('start tracking with opening stock', $c === 200 && $near(stock($scoop), 25), $r);
+[$c, $r] = call('POST', '/master/inventory/set-tracking.php', ['product_ids' => [$scoop], 'track' => true], $staffTok);
+check('cashier without inventory add cannot change tracking (403)', $c === 403, $r);
+[$c, $r] = call('POST', '/master/inventory/set-tracking.php', ['all_untracked' => true, 'track' => true]);
+[, $r2] = call('GET', '/master/inventory/stock.php');
+check('track all', $c === 200 && ($r2['summary']['untracked'] ?? 1) === 0, $r2['summary'] ?? $r);
+[$c, $r] = call('POST', '/master/inventory/set-tracking.php', ['product_ids' => [$scoop], 'track' => false]);
+[, $r2] = call('GET', '/master/inventory/stock.php?filter=untracked');
+check('stop tracking', $c === 200 && ($r2['total'] ?? 0) === 1, $r2);
+
 echo "\n$checks checks, $failures failed\n";
 exit($failures ? 1 : 0);
