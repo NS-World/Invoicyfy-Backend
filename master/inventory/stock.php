@@ -4,7 +4,8 @@ allow_methods('GET');
 $user = require_auth();
 
 [$page, $limit, $offset, $search] = pagination();
-$where = 'p.track_inventory = 1';
+// Inactive (deleted / switched off) products are not part of the stock screen.
+$where = "p.track_inventory = 1 AND p.status <> 'Inactive'";
 $params = [];
 $scope = scope_store($user, $_GET['store_id'] ?? null);
 if ($scope !== null) {
@@ -29,7 +30,7 @@ $summary = cast_numbers(db_one(
             SUM(p.stock_qty > 0 AND p.stock_qty <= p.low_stock_threshold) AS low_stock,
             COALESCE(SUM(GREATEST(p.stock_qty,0) * p.cost_price),0) AS stock_value_cost,
             COALESCE(SUM(GREATEST(p.stock_qty,0) * p.price),0) AS stock_value_sale
-     FROM products p WHERE p.track_inventory = 1" . ($scope !== null ? ' AND (p.store_id = ? OR p.store_id IS NULL)' : ''),
+     FROM products p WHERE p.track_inventory = 1 AND p.status <> 'Inactive'" . ($scope !== null ? ' AND (p.store_id = ? OR p.store_id IS NULL)' : ''),
     $scope !== null ? [$scope] : []
 ), ['stock_value_cost', 'stock_value_sale'], ['products', 'out_of_stock', 'low_stock']);
 
