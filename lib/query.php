@@ -72,7 +72,8 @@ function search_matchers(string $search, array $spec, string $alias = ''): array
             $out[] = ["$col LIKE ?", [like_prefix($digits)]];
         }
     }
-    foreach ($spec['suffix'] ?? [] as $col) {
+    // "ends with" only for text with a digit in it (an order number never ends in letters only).
+    foreach (preg_match('/\d/', $search) ? $spec['suffix'] ?? [] : [] as $col) {
         // "ends with" (e.g. order number ORD/26-27/0035 found by typing 35): reads only that column's index.
         $out[] = ["$col LIKE ?", ['%' . addcslashes($search, '%_\\')]];
     }
@@ -163,11 +164,40 @@ function list_search(string $search, string $table, string $pk, string $alias, a
     if ($search === '') {
         return ['', [], '', []];
     }
+    $like = '%' . addcslashes($search, '%_\\') . '%';
+    $contains = [' AND (' . implode(' OR ', array_map(fn($c) => "$c LIKE ?", $likeCols)) . ')', array_fill(0, count($likeCols), $like)];
     $rows = (int) db_value('SELECT COUNT(*) FROM (SELECT 1 ' . $baseSql . ' LIMIT ' . ($threshold + 1) . ') t', $baseParams);
     if ($rows <= $threshold) {
-        $like = '%' . addcslashes($search, '%_\\') . '%';
-        return ['', [], ' AND (' . implode(' OR ', array_map(fn($c) => "$c LIKE ?", $likeCols)) . ')', array_fill(0, count($likeCols), $like)];
+        return ['', [], ...$contains];
+    }
+    // A very common word (a surname on thousands of bills): the index finds every match of all time and each one
+    // must then be read and checked against the other filters. Checking the rows of the filters (e.g. a date range)
+    // directly is cheaper then. The quick capped counts below tell the two cases apart.
+    if (search_match_estimate($search, $table, $spec) > 5000) {
+        return ['', [], ...$contains];
     }
     [$join, $params] = search_join($search, $table, $pk, $alias, $spec);
     return [$join, $params, '', []];
+}
+
+/** Matches of the indexed search conditions, counted only up to $cap per condition (each count stops early). */
+function search_match_estimate(string $search, string $table, array $spec, int $cap = 5000): int
+{
+    $n = 0;
+    foreach (search_matchers($search, $spec) as [$sql, $p]) {
+        $n += (int) db_value("SELECT COUNT(*) FROM (SELECT 1 FROM $table WHERE $sql LIMIT " . ($cap + 1) . ') t', $p);
+        if ($n > $cap) {
+            return $n;
+        }
+    }
+    if (!empty($spec['via'])) {
+        [$vTable, , , $vSpec] = $spec['via'];
+        foreach (search_matchers($search, $vSpec) as [$sql, $p]) {
+            $n += (int) db_value("SELECT COUNT(*) FROM (SELECT 1 FROM $vTable WHERE $sql LIMIT " . ($cap + 1) . ') t', $p);
+            if ($n > $cap) {
+                return $n;
+            }
+        }
+    }
+    return $n;
 }

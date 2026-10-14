@@ -159,7 +159,7 @@ function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp'
         $where[] = "EXISTS ($bought)";
         $params[] = $storeId;
     }
-    $order = 'c.name';
+    $order = 'c.customer_id'; // table order: no sort of every customer (the audience can be lakhs of people)
     $limit = '';
     if ($activity === 'top') {
         $order = "(SELECT COALESCE(SUM(i.total_amount), 0) FROM invoices i WHERE i.customer_id = c.customer_id AND i.store_id = " . (int) $storeId . " AND i.status <> 'Cancelled') DESC";

@@ -177,12 +177,32 @@ function expiring_batches(?int $scope, int $days, int $limit = 200): array
         "SELECT b.batch_id, b.product_id, p.name AS product_name, p.unit, b.batch_no, b.expiry_date, b.qty_left, b.qty_received,
                 COALESCE(b.unit_cost, p.cost_price) AS unit_cost, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
          FROM stock_batches b JOIN products p ON p.product_id = b.product_id
-         WHERE $where ORDER BY b.expiry_date, p.name LIMIT " . max(1, $limit),
+         WHERE $where ORDER BY b.expiry_date, b.batch_id LIMIT " . max(1, $limit),
         $params
     );
     return array_map(fn($r) => cast_numbers($r, ['qty_left', 'qty_received', 'unit_cost'], ['batch_id', 'product_id', 'days_left']) + [
         'value' => round((float) $r['qty_left'] * (float) $r['unit_cost'], 2),
     ], $rows);
+}
+
+/** Count and stock value of the batches expired or expiring within $days (all of them, not one page). */
+function expiring_summary(?int $scope, int $days): array
+{
+    if (!v4_ready()) {
+        return ['batches' => 0, 'value' => 0.0];
+    }
+    $where = 'b.qty_left > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date <= ? AND p.status <> \'Inactive\'';
+    $params = [date('Y-m-d', strtotime("+$days days"))];
+    if ($scope !== null) {
+        $where .= ' AND (b.store_id = ? OR b.store_id IS NULL)';
+        $params[] = $scope;
+    }
+    $r = db_one(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(ROUND(b.qty_left * COALESCE(b.unit_cost, p.cost_price), 2)), 0) AS value
+         FROM stock_batches b JOIN products p ON p.product_id = b.product_id WHERE $where",
+        $params
+    );
+    return ['batches' => (int) $r['n'], 'value' => money($r['value'])];
 }
 
 function expiry_text(array $store, int $days): ?string

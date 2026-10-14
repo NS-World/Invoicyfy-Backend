@@ -110,7 +110,7 @@ return [
         'indexes' => [
             'idx_customers_phone' => '(phone)', 'idx_customers_name' => '(name)', 'idx_customers_gstin' => '(gstin)', 'idx_customers_email' => '(email)',
             'idx_customers_created' => '(created_at, customer_id)', 'idx_customers_city' => '(city)',
-            'idx_customers_birthday' => '(birthday)', 'idx_customers_anniversary' => '(anniversary)',
+            'idx_customers_birthday' => '(birthday)', 'idx_customers_anniversary' => '(anniversary)', 'idx_customers_deleted' => '(deleted_at, name)',
         ],
         'fulltext' => ['ft_customers_name' => '(name, company_name)'],
     ],
@@ -308,7 +308,7 @@ return [
             'idx_invoices_number' => '(invoice_number)',
             'idx_invoices_gstin' => '(customer_gstin)',
             'idx_invoices_user_date' => '(user_id, invoice_date)',
-            'idx_invoices_channel' => '(sales_channel, invoice_date)',
+            'idx_invoices_channel' => '(sales_channel, invoice_date)', 'idx_invoices_channel_store' => '(sales_channel, store_id, invoice_date)',
         ],
         'fulltext' => ['ft_invoices_customer' => '(customer_name)'],
         'uniques' => ['uq_invoices_number' => '(store_id, fy, invoice_number)', 'uq_invoices_client_uuid' => '(client_uuid)'],
@@ -391,7 +391,10 @@ return [
             'updated_at' => 'TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP',
         ],
         'constraints' => ['FOREIGN KEY (store_id) REFERENCES stores(store_id)'],
-        'indexes' => ['idx_expenses_store_date' => '(store_id, expense_date)', 'idx_expenses_category' => '(category)', 'idx_expenses_date' => '(expense_date, expense_id)'],
+        'indexes' => ['idx_expenses_store_date' => '(store_id, expense_date)', 'idx_expenses_date' => '(expense_date, expense_id)',
+            // Covering: month / category totals read only the index.
+            'idx_expenses_date_totals' => '(expense_date, store_id, category, amount, tax_amount)', 'idx_expenses_cat_amount' => '(category, amount)'],
+        'drop_indexes' => ['idx_expenses_category'],
         'fulltext' => ['ft_expenses_text' => '(description, vendor)'],
     ],
 
@@ -413,7 +416,7 @@ return [
         'constraints' => ['FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE'],
         'indexes' => [
             'idx_stock_product' => '(product_id, created_at)', 'idx_stock_store' => '(store_id, movement_id)', 'idx_stock_type' => '(movement_type, movement_id)',
-            'idx_stock_reference' => '(reference_type, reference_id)',
+            'idx_stock_reference' => '(reference_type, reference_id)', 'idx_stock_type_date' => '(movement_type, created_at)',
         ],
     ],
 
@@ -616,10 +619,11 @@ return [
         ],
         'indexes' => [
             'idx_activity_store_date' => '(store_id, created_at)',
-            'idx_activity_action' => '(action, created_at)',
+            'idx_activity_action_cover' => '(action, created_at, store_id, user_id, entity_id)', // e.g. cancels per cashier (staff report)
             'idx_activity_user' => '(user_id, created_at)',
             'idx_activity_created' => '(created_at, log_id)',
         ],
+        'drop_indexes' => ['idx_activity_action'],
         'fulltext' => ['ft_activity_summary' => '(summary)'],
     ],
 
@@ -766,7 +770,8 @@ return [
             'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
         ],
         'constraints' => ['FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE'],
-        'indexes' => ['idx_batches_product' => '(product_id, qty_left, expiry_date)', 'idx_batches_expiry' => '(store_id, expiry_date)', 'idx_batches_purchase' => '(purchase_id)'],
+        'indexes' => ['idx_batches_product' => '(product_id, qty_left, expiry_date)', 'idx_batches_expiry' => '(store_id, expiry_date)', 'idx_batches_purchase' => '(purchase_id)',
+            'idx_batches_expiry_all' => '(expiry_date, batch_id)'],
     ],
 
     'offers' => [
@@ -891,7 +896,11 @@ return [
             'paid' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
             'balance' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
         ],
-        'indexes' => ['idx_stat_cust_store_month' => '(store_id, month)', 'idx_stat_cust_month' => '(month)'],
+        // Covering: customer totals of a range read only the index.
+        'indexes' => ['idx_stat_cust_store_cover' => '(store_id, month, customer_id, bills, taxable, tax, total, paid, balance)',
+                      'idx_stat_cust_month_cover' => '(month, customer_id, bills, taxable, tax, total, paid, balance)',
+                      'idx_stat_cust_walkin' => '(customer_id, month)'],
+        'drop_indexes' => ['idx_stat_cust_store_month', 'idx_stat_cust_month'],
     ],
 
     'stat_gst_daily' => [
@@ -930,6 +939,37 @@ return [
         ],
         'primary' => '(store_id, day, method)',
         'indexes' => ['idx_stat_pay_day' => '(day)'],
+    ],
+
+    // Staff report: live bills per cashier per day, and money each cashier collected per mode.
+    'stat_staff_daily' => [
+        'columns' => [
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+            'user_id' => 'INT NOT NULL',
+            'bills' => 'INT NOT NULL DEFAULT 0',
+            'sales' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'discount' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'coupon' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'loyalty' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'offer' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'approvals' => 'INT NOT NULL DEFAULT 0',
+        ],
+        'primary' => '(store_id, day, user_id)',
+        'indexes' => ['idx_stat_staff_day' => '(day)'],
+    ],
+
+    'stat_staff_pay_daily' => [
+        'columns' => [
+            'store_id' => 'INT NOT NULL',
+            'day' => 'DATE NOT NULL',
+            'user_id' => 'INT NOT NULL',
+            'method' => 'VARCHAR(50) NOT NULL',
+            'amount' => 'DECIMAL(16,2) NOT NULL DEFAULT 0',
+            'payments' => 'INT NOT NULL DEFAULT 0',
+        ],
+        'primary' => '(store_id, day, user_id, method)',
+        'indexes' => ['idx_stat_staff_pay_day' => '(day)'],
     ],
 
     'stat_dirty' => [

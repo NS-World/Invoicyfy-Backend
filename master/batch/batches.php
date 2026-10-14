@@ -30,14 +30,28 @@ if ($search !== '') {
     $like = '%' . addcslashes($search, '%_\\') . '%';
     array_push($params, $like, $like);
 }
-$total = (int) db_value("SELECT COUNT(*) FROM stock_batches b JOIN products p ON p.product_id = b.product_id WHERE $where", $params);
-$rows = db_all(
+// Soonest expiry first, batches without an expiry date last: each part is read in (expiry_date, batch_id)
+// index order, so a page is a short index walk even with many thousands of batches.
+$src = 'FROM stock_batches b' . ($search !== '' ? ' JOIN products p ON p.product_id = b.product_id' : '');
+$cnt = db_one("SELECT COUNT(*) AS n, COALESCE(SUM(b.expiry_date IS NOT NULL), 0) AS dated $src WHERE $where", $params);
+$total = (int) $cnt['n'];
+$dated = (int) $cnt['dated'];
+$ids = [];
+if ($offset < $dated) {
+    $ids = page_ids("SELECT b.batch_id AS id $src WHERE $where AND b.expiry_date IS NOT NULL ORDER BY b.expiry_date, b.batch_id", $params, $limit, $offset);
+}
+if (count($ids) < $limit && $total > $dated) {
+    array_push($ids, ...page_ids("SELECT b.batch_id AS id $src WHERE $where AND b.expiry_date IS NULL ORDER BY b.batch_id", $params,
+        $limit - count($ids), max(0, $offset - $dated)));
+}
+$rows = rows_in_order(
     "SELECT b.*, p.name AS product_name, p.unit, s.name AS supplier_name, pu.bill_no,
             COALESCE(b.unit_cost, p.cost_price) AS cost, DATEDIFF(b.expiry_date, CURDATE()) AS days_left
      FROM stock_batches b JOIN products p ON p.product_id = b.product_id
      LEFT JOIN purchases pu ON pu.purchase_id = b.purchase_id LEFT JOIN suppliers s ON s.supplier_id = pu.supplier_id
-     WHERE $where ORDER BY b.expiry_date IS NULL, b.expiry_date, b.batch_id LIMIT ? OFFSET ?",
-    array_merge($params, [$limit, $offset])
+     WHERE b.batch_id IN (%s)",
+    $ids,
+    'batch_id'
 );
 json_out(['status' => 'success', 'page' => $page, 'limit' => $limit, 'total' => $total, 'data' => array_map(fn($r) => cast_numbers($r,
     ['qty_received', 'qty_left', 'unit_cost', 'cost'], ['batch_id', 'product_id', 'store_id', 'purchase_id', 'days_left']), $rows)]);

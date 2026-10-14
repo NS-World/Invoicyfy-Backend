@@ -20,14 +20,27 @@ $get = function (int $uid, ?string $name) use (&$staff) {
     return $uid;
 };
 
-$v4 = v4_ready() ? ', COALESCE(SUM(i.offer_discount),0) AS offer' : ', 0 AS offer';
-foreach (db_all(
-    "SELECT i.user_id, u.name, COUNT(*) AS bills, SUM(i.total_amount) AS sales, SUM(i.discount_amount) AS discount,
-            COALESCE(SUM(i.coupon_discount),0) AS coupon, COALESCE(SUM(i.loyalty_discount),0) AS loyalty$v4, SUM(i.approved_by IS NOT NULL) AS approvals
-     FROM invoices i LEFT JOIN users u ON u.user_id = i.user_id
-     WHERE i.status <> 'Cancelled' AND i.invoice_date BETWEEN ? AND ? $si GROUP BY i.user_id",
-    array_merge([$from, $to], $sp)
-) as $r) {
+$fast = stats_sync(); // day summaries per cashier (exact; kept up to date by every bill and payment)
+if ($fast) {
+    [$ss, $ssp] = stats_store($scope);
+    $billRows = db_all(
+        "SELECT s.user_id, u.name, SUM(s.bills) AS bills, SUM(s.sales) AS sales, SUM(s.discount) AS discount, SUM(s.coupon) AS coupon,
+                SUM(s.loyalty) AS loyalty, SUM(s.offer) AS offer, SUM(s.approvals) AS approvals
+         FROM stat_staff_daily s LEFT JOIN users u ON u.user_id = s.user_id
+         WHERE s.day BETWEEN ? AND ?$ss GROUP BY s.user_id",
+        array_merge([$from, $to], $ssp)
+    );
+} else {
+    $v4 = v4_ready() ? ', COALESCE(SUM(i.offer_discount),0) AS offer' : ', 0 AS offer';
+    $billRows = db_all(
+        "SELECT i.user_id, u.name, COUNT(*) AS bills, SUM(i.total_amount) AS sales, SUM(i.discount_amount) AS discount,
+                COALESCE(SUM(i.coupon_discount),0) AS coupon, COALESCE(SUM(i.loyalty_discount),0) AS loyalty$v4, SUM(i.approved_by IS NOT NULL) AS approvals
+         FROM invoices i LEFT JOIN users u ON u.user_id = i.user_id
+         WHERE i.status <> 'Cancelled' AND i.invoice_date BETWEEN ? AND ? $si GROUP BY i.user_id",
+        array_merge([$from, $to], $sp)
+    );
+}
+foreach ($billRows as $r) {
     $id = $get((int) $r['user_id'], $r['name']);
     $staff[$id] = array_merge($staff[$id], [
         'bills' => (int) $r['bills'], 'sales' => money($r['sales']), 'discount' => money($r['discount']), 'coupon_discount' => money($r['coupon']),
@@ -39,8 +52,10 @@ foreach (db_all(
 // Cancelled: who pressed "Cancel" (from the activity log), in the period.
 $aw = "a.action = 'invoice.cancel' AND a.created_at >= ? AND a.created_at < ? + INTERVAL 1 DAY" . ($scope !== null ? ' AND a.store_id = ?' : '');
 foreach (db_all(
-    "SELECT a.user_id, a.user_name, COUNT(*) AS n, COALESCE(SUM(i.total_amount),0) AS amount
-     FROM activity_log a LEFT JOIN invoices i ON i.invoice_id = a.entity_id WHERE $aw GROUP BY a.user_id, a.user_name",
+    "SELECT c.user_id, u.name AS user_name, c.n, c.amount
+     FROM (SELECT a.user_id, COUNT(*) AS n, COALESCE(SUM(i.total_amount),0) AS amount
+           FROM activity_log a LEFT JOIN invoices i ON i.invoice_id = a.entity_id WHERE $aw GROUP BY a.user_id) c
+     LEFT JOIN users u ON u.user_id = c.user_id",
     array_merge([$from, $to], $scope !== null ? [$scope] : [])
 ) as $r) {
     $id = $get((int) $r['user_id'], $r['user_name']);
@@ -49,12 +64,19 @@ foreach (db_all(
 }
 
 [$pf, $pp] = store_filter($user, 'p');
-foreach (db_all(
-    "SELECT p.user_id, u.name, p.payment_method, SUM(p.amount) AS amount, COUNT(*) AS n
-     FROM payments p LEFT JOIN users u ON u.user_id = p.user_id
-     WHERE p.payment_date BETWEEN ? AND ? $pf GROUP BY p.user_id, p.payment_method",
-    array_merge([$from, $to], $pp)
-) as $r) {
+$payRows = $fast
+    ? db_all(
+        "SELECT s.user_id, u.name, s.method AS payment_method, SUM(s.amount) AS amount FROM stat_staff_pay_daily s LEFT JOIN users u ON u.user_id = s.user_id
+         WHERE s.day BETWEEN ? AND ?$ss GROUP BY s.user_id, s.method",
+        array_merge([$from, $to], $ssp)
+    )
+    : db_all(
+        "SELECT p.user_id, u.name, p.payment_method, SUM(p.amount) AS amount, COUNT(*) AS n
+         FROM payments p LEFT JOIN users u ON u.user_id = p.user_id
+         WHERE p.payment_date BETWEEN ? AND ? $pf GROUP BY p.user_id, p.payment_method",
+        array_merge([$from, $to], $pp)
+    );
+foreach ($payRows as $r) {
     $id = $get((int) $r['user_id'], $r['name']);
     $staff[$id]['by_method'][$r['payment_method']] = money($r['amount']);
     $staff[$id]['collected'] = money($staff[$id]['collected'] + (float) $r['amount']);

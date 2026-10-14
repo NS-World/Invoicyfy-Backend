@@ -23,28 +23,26 @@ switch ($group) {
                 FROM $S s WHERE $base GROUP BY label ORDER BY label";
         break;
     case 'product':
-        [$items, $params] = items_source($from, $to, $scope);
-        $sql = "SELECT MAX(x.product_name) AS label, SUM(x.bills) AS invoices, SUM(x.qty) AS quantity,
-                       SUM(x.taxable) AS taxable_value, SUM(x.tax) AS tax_amount, SUM(x.line_total) AS total_amount, SUM(x.cost) AS cost
-                FROM $items GROUP BY x.product_id, x.product_name ORDER BY total_amount DESC LIMIT $top";
-        $totalsSql = "SELECT SUM(x.bills) AS invoices, SUM(x.qty) AS quantity, SUM(x.taxable) AS taxable_value, SUM(x.tax) AS tax_amount,
-                             SUM(x.line_total) AS total_amount, SUM(x.cost) AS cost FROM $items";
-        break;
+        $all = item_rollup(item_groups($from, $to, $scope), ['product_id', 'product_name']);
+        usort($all, fn($a, $b) => $b['line_total'] <=> $a['line_total']);
+        $rows = array_map(fn($g) => ['label' => $g['product_name'], 'invoices' => (int) $g['bills'], 'quantity' => round($g['qty'], 3),
+            'taxable_value' => round($g['taxable'], 2), 'tax_amount' => round($g['tax'], 2), 'total_amount' => round($g['line_total'], 2),
+            'cost' => round($g['cost'], 2)], array_slice($all, 0, $top));
+        $totals = [];
+        if ($rows) {
+            foreach (['invoices' => 'bills', 'quantity' => 'qty', 'taxable_value' => 'taxable', 'tax_amount' => 'tax', 'total_amount' => 'line_total', 'cost' => 'cost'] as $k => $c) {
+                $totals[$k] = round(array_sum(array_column($all, $c)), 2);
+            }
+        }
+        json_out(["status" => "success", "range" => ["from" => $from, "to" => $to], "group" => $group, "totals" => $totals, "data" => $rows,
+            "truncated" => count($rows) >= $top]);
     case 'customer':
-        [$cust, $params] = customers_source($from, $to, $scope);
-        // Saved customers are grouped by id (a small number), walk-in bills by the name typed on them.
-        $cols = "SUM(x.bills) AS invoices, SUM(x.taxable) AS taxable_value, SUM(x.tax) AS tax_amount, SUM(x.total) AS total_amount,
-                 SUM(x.paid) AS amount_paid, SUM(x.balance) AS balance_due";
-        $sql = "(SELECT MAX(x.customer_name) AS label, MAX(x.customer_gstin) AS gstin, $cols FROM $cust WHERE x.customer_id <> 0 GROUP BY x.customer_id)
-                UNION ALL
-                (SELECT COALESCE(x.customer_name,'Walk-in') AS label, MAX(x.customer_gstin) AS gstin, $cols FROM $cust WHERE x.customer_id = 0 GROUP BY x.customer_name)
-                ORDER BY total_amount DESC LIMIT $top";
-        $params = array_merge($params, $params);
-        // Totals of every customer = all live bills of the range (day summaries).
-        $totalsSql = "SELECT SUM(s.bills) AS invoices, SUM(s.taxable) AS taxable_value, SUM(s.tax) AS tax_amount,
-                             SUM(s.total) AS total_amount, SUM(s.paid) AS amount_paid, SUM(s.balance) AS balance_due FROM $S s WHERE $base";
-        $totalsParams = array_merge([$from, $to], $ssp);
-        break;
+        // Saved customers by id, walk-in bills by the name typed on them; totals of every customer.
+        [$rows, $sum] = customer_totals($from, $to, $scope, $top);
+        $rows = f2(array_map(fn($r) => array_diff_key($r, ['phone' => 1]), $rows), ['taxable_value', 'tax_amount', 'total_amount', 'amount_paid', 'balance_due'], ['invoices']);
+        $totals = $rows ? array_map(fn($v) => round((float) $v, 2), $sum) : [];
+        json_out(["status" => "success", "range" => ["from" => $from, "to" => $to], "group" => $group, "totals" => $totals, "data" => $rows,
+            "truncated" => count($rows) >= $top]);
     default:
         $group = 'day';
         $sql = "SELECT s.day AS label, SUM(s.bills) AS invoices, SUM(s.taxable) AS taxable_value, SUM(s.tax) AS tax_amount,

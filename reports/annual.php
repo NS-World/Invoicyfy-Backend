@@ -92,8 +92,24 @@ unset($totals['_balance']);
 $previous = annual_totals(($start - 1) . '-04-01', "$start-03-31", $S, $ss, $ssp, $se, $sep);
 unset($previous['_balance']);
 $growth = fn($k) => $previous[$k] > 0 ? round(($totals[$k] - $previous[$k]) * 100 / $previous[$k], 1) : null;
-[$items, $itemParams] = items_source($from, $to, $scope);
-[$cust, $custParams] = customers_source($from, $to, $scope);
+$groups = item_groups($from, $to, $scope);
+$byProduct = item_rollup($groups, ['product_id', 'product_name']);
+usort($byProduct, fn($a, $b) => $b['line_total'] <=> $a['line_total']);
+$categories = [];
+$cat = [];
+foreach ($groups ? db_all('SELECT product_id, category FROM products WHERE product_id IN (' . implode(',', array_unique(array_column($groups, 'product_id'))) . ')') : [] as $p) {
+    $cat[(int) $p['product_id']] = $p['category'];
+}
+foreach ($groups as $g) {
+    $c = (string) ($cat[$g['product_id']] ?? '') !== '' ? $cat[$g['product_id']] : 'Other';
+    $categories[$c] ??= ['category' => $c, 'quantity' => 0.0, 'sales' => 0.0];
+    $categories[$c]['quantity'] += $g['qty'];
+    $categories[$c]['sales'] += $g['line_total'];
+}
+usort($categories, fn($a, $b) => $b['sales'] <=> $a['sales']);
+$rates = item_rollup($groups, ['gst_rate']);
+usort($rates, fn($a, $b) => $a['gst_rate'] <=> $b['gst_rate']);
+[$topCustomers] = customer_totals($from, $to, $scope, 25, false);
 
 json_out([
     'status' => 'success',
@@ -104,22 +120,11 @@ json_out([
     'previous' => $previous,
     'growth' => ['sales' => $growth('sales'), 'profit' => $growth('profit'), 'bills' => $growth('bills')],
     'monthly' => array_values($months),
-    'top_products' => f2(db_all(
-        "SELECT x.product_name AS name, MAX(x.unit) AS unit, SUM(x.qty) AS quantity, SUM(x.line_total) AS sales, SUM(x.taxable - x.cost) AS margin
-         FROM $items GROUP BY x.product_id, x.product_name ORDER BY sales DESC LIMIT 25",
-        $itemParams
-    ), ['quantity', 'sales', 'margin']),
-    'categories' => f2(db_all(
-        "SELECT COALESCE(NULLIF(pr.category,''),'Other') AS category, SUM(t.qty) AS quantity, SUM(t.sales) AS sales
-         FROM (SELECT x.product_id, SUM(x.qty) AS qty, SUM(x.line_total) AS sales FROM $items GROUP BY x.product_id) t
-         LEFT JOIN products pr ON pr.product_id = t.product_id GROUP BY category ORDER BY sales DESC",
-        $itemParams
-    ), ['quantity', 'sales']),
-    'top_customers' => f2(db_all(
-        "SELECT COALESCE(MAX(x.customer_name),'Walk-in') AS name, MAX(x.customer_phone) AS phone, SUM(x.bills) AS bills, SUM(x.total) AS sales, SUM(x.balance) AS balance_due
-         FROM $cust WHERE x.customer_id <> 0 GROUP BY x.customer_id ORDER BY sales DESC LIMIT 25",
-        $custParams
-    ), ['sales', 'balance_due'], ['bills']),
+    'top_products' => array_map(fn($g) => ['name' => $g['product_name'], 'unit' => $g['unit'], 'quantity' => round($g['qty'], 3),
+        'sales' => round($g['line_total'], 2), 'margin' => round($g['taxable'] - $g['cost'], 2)], array_slice($byProduct, 0, 25)),
+    'categories' => array_map(fn($c) => ['category' => $c['category'], 'quantity' => round($c['quantity'], 3), 'sales' => round($c['sales'], 2)], $categories),
+    'top_customers' => f2(array_map(fn($r) => ['name' => $r['label'], 'phone' => $r['phone'], 'bills' => $r['invoices'], 'sales' => $r['total_amount'],
+        'balance_due' => $r['balance_due']], $topCustomers), ['sales', 'balance_due'], ['bills']),
     'payment_modes' => f2(db_all(
         "SELECT s.method, SUM(s.done_count) AS count, SUM(s.done_amount) AS amount FROM $P s
          WHERE s.day BETWEEN ? AND ?$ss GROUP BY s.method HAVING count > 0 ORDER BY amount DESC",
@@ -129,11 +134,8 @@ json_out([
         "SELECT COALESCE(NULLIF(s.order_type,''),'Counter') AS type, SUM(s.bills) AS bills, SUM(s.total) AS sales FROM $S s WHERE $live GROUP BY type ORDER BY sales DESC",
         $range
     ), ['sales'], ['bills']),
-    'gst_rates' => f2(db_all(
-        "SELECT x.gst_rate, SUM(x.taxable) AS taxable_value, SUM(x.cgst) AS cgst, SUM(x.sgst) AS sgst, SUM(x.igst) AS igst, SUM(x.tax) AS tax
-         FROM $items GROUP BY x.gst_rate ORDER BY x.gst_rate",
-        $itemParams
-    ), ['gst_rate', 'taxable_value', 'cgst', 'sgst', 'igst', 'tax']),
+    'gst_rates' => array_map(fn($g) => ['gst_rate' => $g['gst_rate'], 'taxable_value' => round($g['taxable'], 2), 'cgst' => round($g['cgst'], 2),
+        'sgst' => round($g['sgst'], 2), 'igst' => round($g['igst'], 2), 'tax' => round($g['tax'], 2)], $rates),
     'expenses_by_category' => f2(db_all(
         "SELECT e.category, COUNT(*) AS count, SUM(e.amount) AS amount FROM expenses e WHERE e.expense_date BETWEEN ? AND ? $se GROUP BY e.category ORDER BY amount DESC",
         array_merge([$from, $to], $sep)

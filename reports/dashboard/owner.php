@@ -71,8 +71,7 @@ $lowStock = (int) db_value(
 $attention = ['dues' => ['customers' => (int) $dues['customers'], 'amount' => money($dues['amount'])], 'low_stock' => $lowStock];
 if (v4_ready()) {
     $days = $scope !== null ? (int) pos_settings(get_store($scope))['expiry_alert_days'] : 3;
-    $exp = expiring_batches($scope, $days, 500);
-    $attention['expiring'] = ['batches' => count($exp), 'value' => money(array_sum(array_column($exp, 'value'))), 'days' => $days];
+    $attention['expiring'] = expiring_summary($scope, $days) + ['days' => $days];
     $owed = db_one(
         'SELECT (SELECT COALESCE(SUM(opening_balance),0) FROM suppliers' . ($scope !== null ? ' WHERE store_id = ?' : '') . ')
               + (SELECT COALESCE(SUM(total_amount),0) FROM purchases WHERE status <> \'Cancelled\'' . ($scope !== null ? ' AND store_id = ?' : '') . ')
@@ -80,11 +79,13 @@ if (v4_ready()) {
         $scope !== null ? [$scope, $scope, $scope] : []
     );
     $attention['supplier_dues'] = money($owed['owed']);
-    $pending = db_one(
-        "SELECT COUNT(*) AS n, COALESCE(SUM(i.total_amount - i.channel_commission),0) AS amount FROM invoices i
-         WHERE i.sales_channel IS NOT NULL AND i.settled_at IS NULL AND i.status <> 'Cancelled' AND i.invoice_date >= ? $si",
-        array_merge([date('Y-m-d', strtotime('-60 days'))], $sp)
-    );
+    // Platforms as an IN list so the (platform, store, date) index reads only the online bills of 60 days.
+    $channels = array_column(db_all('SELECT DISTINCT sales_channel FROM invoices WHERE sales_channel IS NOT NULL'), 'sales_channel');
+    $pending = $channels ? db_one(
+        'SELECT COUNT(*) AS n, COALESCE(SUM(i.total_amount - i.channel_commission),0) AS amount FROM invoices i
+         WHERE i.sales_channel IN (' . implode(',', array_fill(0, count($channels), '?')) . ") AND i.settled_at IS NULL AND i.status <> 'Cancelled' AND i.invoice_date >= ? $si",
+        array_merge($channels, [date('Y-m-d', strtotime('-60 days'))], $sp)
+    ) : ['n' => 0, 'amount' => 0];
     $attention['online_pending'] = ['orders' => (int) $pending['n'], 'amount' => money($pending['amount'])];
 }
 

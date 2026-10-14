@@ -21,6 +21,12 @@ if (!isset($pdo)) {
         $offset = (new DateTime())->format('P');
         // Same collation as the tables, so text comparisons never mix collations (some hosts default to another one).
         $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci, time_zone = '$offset'");
+        try {
+            // Report GROUP BYs over a year of data stay in memory instead of spilling to a disk temp table
+            // (memory is only used by queries that need it). Ignored where the host does not allow it.
+            $pdo->exec('SET SESSION tmp_table_size = 67108864, max_heap_table_size = 67108864');
+        } catch (PDOException $e) {
+        }
     } catch (PDOException $e) {
         error_log('DB connection failed: ' . $e->getMessage());
         http_response_code(500);

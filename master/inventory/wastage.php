@@ -14,7 +14,35 @@ if ($scope !== null) {
     $params[] = $scope;
 }
 $value = 'ABS(m.quantity) * COALESCE(m.unit_cost, p.cost_price)';
-$sum = db_one("SELECT COUNT(*) AS n, COALESCE(SUM($value),0) AS loss FROM stock_movements m JOIN products p ON p.product_id = m.product_id WHERE $where", $params);
+// Totals, top items and loss by reason from one pass, grouped by item and reason (a few hundred rows at most).
+$params2 = [];
+$case = 'CASE';
+foreach (WASTAGE_REASONS as $w) {
+    $case .= ' WHEN m.notes LIKE ? THEN ?';
+    array_push($params2, addcslashes($w, '%_\\') . '%', $w);
+}
+$case .= " ELSE 'Other' END";
+$groups = db_all(
+    "SELECT m.product_id, MAX(p.name) AS product_name, MAX(p.unit) AS unit, $case AS reason, COUNT(*) AS n,
+            SUM(ABS(m.quantity)) AS quantity, COALESCE(SUM($value),0) AS loss
+     FROM stock_movements m JOIN products p ON p.product_id = m.product_id WHERE $where GROUP BY m.product_id, reason",
+    array_merge($params2, $params)
+);
+$sum = ['n' => 0, 'loss' => 0.0];
+$items = [];
+$byReason = [];
+foreach ($groups as $g) {
+    $sum['n'] += (int) $g['n'];
+    $sum['loss'] += (float) $g['loss'];
+    $id = (int) $g['product_id'];
+    $items[$id] ??= ['product_name' => $g['product_name'], 'unit' => $g['unit'], 'quantity' => 0.0, 'loss' => 0.0];
+    $items[$id]['quantity'] += (float) $g['quantity'];
+    $items[$id]['loss'] += (float) $g['loss'];
+    $byReason[$g['reason']] = round(($byReason[$g['reason']] ?? 0) + (float) $g['loss'], 2);
+}
+usort($items, fn($a, $b) => $b['loss'] <=> $a['loss']);
+$byItem = array_slice($items, 0, 10);
+arsort($byReason);
 $rows = db_all(
     "SELECT m.movement_id, m.created_at, m.product_id, p.name AS product_name, p.unit, ABS(m.quantity) AS quantity, m.notes,
             COALESCE(m.unit_cost, p.cost_price) AS unit_cost, $value AS loss, m.movement_type, u.name AS user_name
@@ -22,23 +50,6 @@ $rows = db_all(
      WHERE $where ORDER BY m.created_at DESC, m.movement_id DESC LIMIT ? OFFSET ?",
     array_merge($params, [$limit, $offset])
 );
-$byItem = db_all(
-    "SELECT p.name AS product_name, p.unit, SUM(ABS(m.quantity)) AS quantity, SUM($value) AS loss
-     FROM stock_movements m JOIN products p ON p.product_id = m.product_id WHERE $where GROUP BY m.product_id ORDER BY loss DESC LIMIT 10",
-    $params
-);
-$byReason = [];
-foreach (db_all("SELECT m.notes, $value AS loss FROM stock_movements m JOIN products p ON p.product_id = m.product_id WHERE $where LIMIT 20000", $params) as $r) {
-    $reason = 'Other';
-    foreach (WASTAGE_REASONS as $w) {
-        if (str_starts_with((string) $r['notes'], $w)) {
-            $reason = $w;
-            break;
-        }
-    }
-    $byReason[$reason] = round(($byReason[$reason] ?? 0) + (float) $r['loss'], 2);
-}
-arsort($byReason);
 json_out([
     'status' => 'success', 'page' => $page, 'limit' => $limit, 'total' => (int) $sum['n'], 'range' => ['from' => $from, 'to' => $to],
     'summary' => ['loss' => round((float) $sum['loss'], 2), 'by_reason' => $byReason,

@@ -21,6 +21,8 @@ $tables = [
     'stat_customers_monthly' => 'store_id, month, customer_id, customer_name, bills, taxable, tax, total, paid, balance',
     'stat_gst_daily' => 'store_id, day, b2b, place_of_supply, hsn_code, unit, gst_rate, qty, line_total, taxable, cgst, sgst, igst, tax',
     'stat_payments_daily' => 'store_id, day, method, live_amount, live_count, done_amount, done_count, all_amount, all_count',
+    'stat_staff_daily' => 'store_id, day, user_id, bills, sales, discount, coupon, loyalty, offer, approvals',
+    'stat_staff_pay_daily' => 'store_id, day, user_id, method, amount, payments',
 ];
 $snapshot = function () use ($tables): array {
     $out = [];

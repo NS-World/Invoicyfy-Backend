@@ -45,7 +45,10 @@ if (!empty($_GET['to'])) {
     ['prefix' => ['invoice_number'], 'digits' => ['customer_phone'], 'gstin' => 'customer_gstin', 'text' => 'customer_name', 'short' => 'customer_name'],
     "FROM invoices i WHERE $where", $params);
 $params = array_merge($joinParams, $params, $searchParams);
-$base = "FROM invoices i$join WHERE $where$searchWhere";
+// "Contains" search inside a date range: read the range through the date index. (For a common word the optimizer
+// otherwise reads the whole table, which is several times slower than the few months asked for.)
+$hint = $join === '' && $searchWhere !== '' && (!empty($_GET['from']) || !empty($_GET['to'])) ? ' FORCE INDEX (idx_invoices_date, idx_invoices_store_date)' : '';
+$base = "FROM invoices i$hint$join WHERE $where$searchWhere";
 
 $status = (string) ($_GET['status'] ?? '');
 if ($search === '' && empty($_GET['customer_id']) && $status !== 'Overdue' && stats_sync()) {

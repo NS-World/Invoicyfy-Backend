@@ -12,8 +12,12 @@ $user = require_auth();
 [$page, $limit, $offset, $search] = pagination();
 [$from, $to] = date_range();
 $storeId = write_store($user, $_GET['store_id'] ?? null);
-$where = "i.store_id = ? AND i.invoice_date BETWEEN ? AND ? AND i.sales_channel IS NOT NULL AND i.status <> 'Cancelled'";
-$params = [$storeId, $from, $to];
+// The platforms that have bills, as an IN list (a few rows from the index), so the (platform, store, date)
+// index narrows straight to this store's online bills of the range instead of every bill of the range.
+$channels = array_column(db_all('SELECT DISTINCT sales_channel FROM invoices WHERE sales_channel IS NOT NULL'), 'sales_channel');
+$in = $channels ? implode(',', array_fill(0, count($channels), '?')) : 'NULL';
+$where = "i.sales_channel IN ($in) AND i.store_id = ? AND i.invoice_date BETWEEN ? AND ? AND i.status <> 'Cancelled'";
+$params = array_merge($channels, [$storeId, $from, $to]);
 $platform = trim((string) ($_GET['platform'] ?? ''));
 $filters = '';
 $fparams = [];
@@ -40,7 +44,8 @@ $summary = array_map(fn($r) => cast_numbers($r, ['sales', 'commission', 'expecte
      FROM invoices i WHERE $where GROUP BY i.sales_channel ORDER BY sales DESC",
     $params
 ));
-$total = (int) db_value("SELECT COUNT(*) FROM invoices i WHERE $where$filters", array_merge($params, $fparams));
+$total = $filters === '' ? array_sum(array_column($summary, 'orders'))
+    : (int) db_value("SELECT COUNT(*) FROM invoices i WHERE $where$filters", array_merge($params, $fparams));
 $rows = db_all(
     "SELECT i.invoice_id, i.invoice_number, i.invoice_date, i.created_at, i.sales_channel AS platform, i.channel_order_id, i.customer_name,
             i.total_amount, i.channel_commission, i.total_amount - i.channel_commission AS expected, i.settled_amount, i.settled_at, i.status

@@ -7,6 +7,8 @@
  *   stat_items_daily     items sold per store / day / product / GST rate (live bills only)
  *   stat_items_monthly   same per month (long ranges such as a financial year)
  *   stat_payments_daily  money received per store / day / payment method
+ *   stat_staff_daily     live bills per store / day / cashier (staff report)
+ *   stat_staff_pay_daily money collected per store / day / cashier / payment method
  *   stat_dirty           days changed since the last refresh
  *
  * Every write that changes a bill or payment calls stats_touch() for the day it belongs to (one tiny row).
@@ -14,7 +16,7 @@
  * tables, so the summaries are always exact. stats_rebuild() recomputes everything (Update database / CLI).
  */
 
-const STATS_VERSION = 'stats_v3';
+const STATS_VERSION = 'stats_v4';
 
 // The CLI migration (database/migrate.php) runs without lib/bootstrap.php: give it the same tiny DB helpers.
 if (!function_exists('db_query')) {
@@ -97,6 +99,9 @@ function stats_sync(): bool
     }
     try {
         if (!stats_ready()) {
+            if (!db_value("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stat_staff_pay_daily'")) {
+                return $synced = false; // "Update database" not pressed yet: it creates the tables and builds them
+            }
             // Small databases are built on the spot; big ones are built by "Update database" / cron.
             if ((int) db_value('SELECT COUNT(*) FROM (SELECT 1 FROM invoices LIMIT 50001) t') > 50000) {
                 return $synced = false;
@@ -166,6 +171,21 @@ function stats_fill(string $invWhere, array $invParams, string $payWhere, array 
          GROUP BY COALESCE(p.store_id, 0), p.payment_date, p.payment_method",
         $payParams
     );
+    db_query(
+        "INSERT INTO stat_staff_daily (store_id, day, user_id, bills, sales, discount, coupon, loyalty, offer, approvals)
+         SELECT i.store_id, i.invoice_date, COALESCE(i.user_id, 0), COUNT(*), SUM(i.total_amount), SUM(i.discount_amount),
+                COALESCE(SUM(i.coupon_discount), 0), COALESCE(SUM(i.loyalty_discount), 0), COALESCE(SUM(i.offer_discount), 0), SUM(i.approved_by IS NOT NULL)
+         FROM invoices i WHERE $invWhere AND i.status <> 'Cancelled'
+         GROUP BY i.store_id, i.invoice_date, COALESCE(i.user_id, 0)",
+        $invParams
+    );
+    db_query(
+        "INSERT INTO stat_staff_pay_daily (store_id, day, user_id, method, amount, payments)
+         SELECT COALESCE(p.store_id, 0), p.payment_date, COALESCE(p.user_id, 0), p.payment_method, SUM(p.amount), COUNT(*)
+         FROM payments p WHERE $payWhere
+         GROUP BY COALESCE(p.store_id, 0), p.payment_date, COALESCE(p.user_id, 0), p.payment_method",
+        $payParams
+    );
 }
 
 /** Month rows: items from the day rows, customers straight from the month's bills. */
@@ -205,6 +225,8 @@ function stats_refresh_day(int $storeId, string $day): void
             db_query('DELETE FROM stat_items_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             db_query('DELETE FROM stat_payments_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             db_query('DELETE FROM stat_gst_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
+            db_query('DELETE FROM stat_staff_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
+            db_query('DELETE FROM stat_staff_pay_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             stats_fill('i.store_id = ? AND i.invoice_date = ?', [$storeId, $day], 'COALESCE(p.store_id, 0) = ? AND p.payment_date = ?', [$storeId, $day]);
             stats_fill_month($storeId, substr($day, 0, 7) . '-01');
         }
@@ -219,7 +241,7 @@ function stats_refresh_day(int $storeId, string $day): void
 function stats_rebuild(): void
 {
     @set_time_limit(0);
-    foreach (['stat_sales_daily', 'stat_items_daily', 'stat_items_monthly', 'stat_customers_monthly', 'stat_gst_daily', 'stat_payments_daily', 'stat_dirty'] as $t) {
+    foreach (['stat_sales_daily', 'stat_items_daily', 'stat_items_monthly', 'stat_customers_monthly', 'stat_gst_daily', 'stat_payments_daily', 'stat_staff_daily', 'stat_staff_pay_daily', 'stat_dirty'] as $t) {
         db_query("DELETE FROM $t");
     }
     $range = db_one('SELECT MIN(d) AS lo, MAX(d) AS hi FROM (SELECT MIN(invoice_date) AS d FROM invoices UNION ALL SELECT MAX(invoice_date) FROM invoices
@@ -249,25 +271,88 @@ function stats_store(?int $scope, string $alias = 's'): array
  */
 function stats_items_source(string $from, string $to, ?int $scope): array
 {
+    [$parts, $params] = stats_items_parts($from, $to, $scope);
+    return [implode(' UNION ALL ', $parts), array_merge(...$params)];
+}
+
+/** The pieces of stats_items_source(): a list of SELECTs and a list of their params (one entry per SELECT). */
+function stats_items_parts(string $from, string $to, ?int $scope): array
+{
     $cols = 'store_id, product_id, product_name, unit, gst_rate, qty, taxable, cgst, sgst, igst, tax, line_total, cost, bills';
     [$st, $sp] = stats_store($scope, 'd');
     $firstFull = substr($from, 8, 2) === '01' ? $from : date('Y-m-01', strtotime(substr($from, 0, 7) . '-01 +1 month'));
     $lastFull = $to === date('Y-m-t', strtotime($to)) ? substr($to, 0, 7) . '-01' : date('Y-m-01', strtotime(substr($to, 0, 7) . '-01 -1 month'));
     if ($firstFull > $lastFull) {
-        return ["SELECT $cols FROM stat_items_daily d WHERE d.day BETWEEN ? AND ?$st", array_merge([$from, $to], $sp)];
+        return [["SELECT $cols FROM stat_items_daily d WHERE d.day BETWEEN ? AND ?$st"], [array_merge([$from, $to], $sp)]];
     }
     $parts = ["SELECT $cols FROM stat_items_monthly d WHERE d.month BETWEEN ? AND ?$st"];
-    $params = array_merge([$firstFull, $lastFull], $sp);
+    $params = [array_merge([$firstFull, $lastFull], $sp)];
     if ($from < $firstFull) {
         $parts[] = "SELECT $cols FROM stat_items_daily d WHERE d.day BETWEEN ? AND ?$st";
-        array_push($params, $from, date('Y-m-d', strtotime("$firstFull -1 day")), ...$sp);
+        $params[] = array_merge([$from, date('Y-m-d', strtotime("$firstFull -1 day"))], $sp);
     }
     $afterLast = date('Y-m-d', strtotime("$lastFull +1 month"));
     if ($to >= $afterLast) {
         $parts[] = "SELECT $cols FROM stat_items_daily d WHERE d.day BETWEEN ? AND ?$st";
-        array_push($params, $afterLast, $to, ...$sp);
+        $params[] = array_merge([$afterLast, $to], $sp);
     }
-    return [implode(' UNION ALL ', $parts), $params];
+    return [$parts, $params];
+}
+
+/**
+ * Items sold in a date range, one row per product / name / GST rate: product_id, product_name, gst_rate, unit,
+ * qty, taxable, cgst, sgst, igst, tax, line_total, cost, bills. Each piece of the range (whole months, partial
+ * months) is summed on its own and the pieces are added up here — no big temporary table, one read of the data.
+ */
+function item_groups(string $from, string $to, ?int $scope): array
+{
+    if (stats_sync()) {
+        [$parts, $params] = stats_items_parts($from, $to, $scope);
+    } else {
+        [$src, $p] = items_source($from, $to, $scope);
+        $parts = ['SELECT * FROM ' . $src];
+        $params = [$p];
+    }
+    $keys = ['qty', 'taxable', 'cgst', 'sgst', 'igst', 'tax', 'line_total', 'cost', 'bills'];
+    $sums = implode(', ', array_map(fn($k) => "SUM(x.$k) AS $k", $keys));
+    $out = [];
+    foreach ($parts as $i => $part) {
+        $src = str_starts_with($part, 'SELECT * FROM ') ? substr($part, 14) : "($part) x";
+        foreach (db_all("SELECT x.product_id, x.product_name, x.gst_rate, MAX(x.unit) AS unit, $sums FROM $src
+                         GROUP BY x.product_id, x.product_name, x.gst_rate", $params[$i]) as $r) {
+            $k = $r['product_id'] . "\0" . $r['product_name'] . "\0" . $r['gst_rate'];
+            if (!isset($out[$k])) {
+                $out[$k] = ['product_id' => (int) $r['product_id'], 'product_name' => $r['product_name'], 'gst_rate' => (float) $r['gst_rate'],
+                    'unit' => $r['unit']] + array_fill_keys($keys, 0.0);
+            } elseif ((string) $r['unit'] > (string) $out[$k]['unit']) {
+                $out[$k]['unit'] = $r['unit'];
+            }
+            foreach ($keys as $c) {
+                $out[$k][$c] += (float) $r[$c];
+            }
+        }
+    }
+    return array_values($out);
+}
+
+/** Adds up item_groups() rows by the given fields (e.g. ['product_id', 'product_name']); keeps the first unit seen. */
+function item_rollup(array $groups, array $by): array
+{
+    $out = [];
+    foreach ($groups as $g) {
+        $k = implode("\0", array_map(fn($f) => (string) $g[$f], $by));
+        if (!isset($out[$k])) {
+            $out[$k] = $g;
+            continue;
+        }
+        foreach (['qty', 'taxable', 'cgst', 'sgst', 'igst', 'tax', 'line_total', 'cost', 'bills'] as $c) {
+            $out[$k][$c] += $g[$c];
+        }
+        if ((string) $g['unit'] > (string) $out[$k]['unit']) {
+            $out[$k]['unit'] = $g['unit'];
+        }
+    }
+    return array_values($out);
 }
 
 /*
@@ -326,32 +411,100 @@ function items_source(string $from, string $to, ?int $scope): array
  */
 function customers_source(string $from, string $to, ?int $scope): array
 {
+    [$parts, $params] = customers_parts($from, $to, $scope);
+    return ['(' . implode(' UNION ALL ', $parts) . ') x', array_merge(...$params)];
+}
+
+/** The pieces of customers_source(): a list of SELECTs and a list of their params (one entry per SELECT). */
+function customers_parts(string $from, string $to, ?int $scope): array
+{
     $live = "SELECT store_id, COALESCE(customer_id, 0) AS customer_id, customer_name, customer_phone, customer_gstin, 1 AS bills, taxable_amount AS taxable,
                     tax_amount AS tax, total_amount AS total, amount_paid AS paid, balance_due AS balance
              FROM invoices d WHERE status <> 'Cancelled' AND invoice_date BETWEEN ? AND ?";
     $st = $scope === null ? '' : ' AND d.store_id = ?';
     $sp = $scope === null ? [] : [$scope];
     if (!stats_sync()) {
-        return ["($live$st) x", array_merge([$from, $to], $sp)];
+        return [[$live . $st], [array_merge([$from, $to], $sp)]];
     }
     $firstFull = substr($from, 8, 2) === '01' ? $from : date('Y-m-01', strtotime(substr($from, 0, 7) . '-01 +1 month'));
     $lastFull = $to === date('Y-m-t', strtotime($to)) ? substr($to, 0, 7) . '-01' : date('Y-m-01', strtotime(substr($to, 0, 7) . '-01 -1 month'));
     if ($firstFull > $lastFull) {
-        return ["($live$st) x", array_merge([$from, $to], $sp)];
+        return [[$live . $st], [array_merge([$from, $to], $sp)]];
     }
     $parts = ["SELECT store_id, customer_id, customer_name, customer_phone, customer_gstin, bills, taxable, tax, total, paid, balance
                FROM stat_customers_monthly d WHERE d.month BETWEEN ? AND ?$st"];
-    $params = array_merge([$firstFull, $lastFull], $sp);
+    $params = [array_merge([$firstFull, $lastFull], $sp)];
     if ($from < $firstFull) {
         $parts[] = $live . $st;
-        array_push($params, $from, date('Y-m-d', strtotime("$firstFull -1 day")), ...$sp);
+        $params[] = array_merge([$from, date('Y-m-d', strtotime("$firstFull -1 day"))], $sp);
     }
     $afterLast = date('Y-m-d', strtotime("$lastFull +1 month"));
     if ($to >= $afterLast) {
         $parts[] = $live . $st;
-        array_push($params, $afterLast, $to, ...$sp);
+        $params[] = array_merge([$afterLast, $to], $sp);
     }
-    return ['(' . implode(' UNION ALL ', $parts) . ') x', $params];
+    return [$parts, $params];
+}
+
+/**
+ * Biggest customers of a date range: saved customers by id, walk-in bills by the name typed on them
+ * ($walkIns = false leaves those out). Each piece of the range is summed on its own with only numbers in the
+ * GROUP BY (small and quick even for a year of bills) and the pieces are added up here.
+ * Returns [rows sorted by total desc (at most $top), totals of all customers].
+ * Row: label, gstin, phone, invoices, taxable_value, tax_amount, total_amount, amount_paid, balance_due.
+ */
+function customer_totals(string $from, string $to, ?int $scope, int $top, bool $walkIns = true): array
+{
+    [$parts, $params] = customers_parts($from, $to, $scope);
+    $sums = 'SUM(x.bills) AS invoices, SUM(x.taxable) AS taxable_value, SUM(x.tax) AS tax_amount, SUM(x.total) AS total_amount,
+             SUM(x.paid) AS amount_paid, SUM(x.balance) AS balance_due';
+    $keys = ['invoices', 'taxable_value', 'tax_amount', 'total_amount', 'amount_paid', 'balance_due'];
+    $all = [];
+    $add = function (string $key, array $r) use (&$all, $keys) {
+        $all[$key] ??= array_fill_keys($keys, 0);
+        foreach ($keys as $k) {
+            $all[$key][$k] += (float) $r[$k];
+        }
+    };
+    foreach ($parts as $i => $part) {
+        foreach (db_all("SELECT x.customer_id AS k, $sums FROM ($part) x WHERE x.customer_id <> 0 GROUP BY x.customer_id", $params[$i]) as $r) {
+            $add('c' . $r['k'], $r);
+        }
+        if ($walkIns) {
+            foreach (db_all("SELECT COALESCE(x.customer_name, '') AS k, $sums FROM ($part) x WHERE x.customer_id = 0 GROUP BY x.customer_name", $params[$i]) as $r) {
+                $add('w' . $r['k'], $r);
+            }
+        }
+    }
+    $totals = array_fill_keys($keys, 0);
+    foreach ($all as $r) {
+        foreach ($keys as $k) {
+            $totals[$k] += $r[$k];
+        }
+    }
+    uasort($all, fn($a, $b) => $b['total_amount'] <=> $a['total_amount']);
+    $all = array_slice($all, 0, $top, true);
+    $ids = [];
+    foreach (array_keys($all) as $key) {
+        if ($key[0] === 'c') {
+            $ids[] = (int) substr($key, 1);
+        }
+    }
+    $people = [];
+    foreach ($ids ? db_all('SELECT customer_id, name, phone, gstin FROM customers WHERE customer_id IN (' . implode(',', $ids) . ')') : [] as $c) {
+        $people[(int) $c['customer_id']] = $c;
+    }
+    $rows = [];
+    foreach ($all as $key => $r) {
+        if ($key[0] === 'c') {
+            $c = $people[(int) substr($key, 1)] ?? null;
+            $head = ['label' => $c['name'] ?? ('Customer #' . substr($key, 1)), 'gstin' => $c['gstin'] ?? null, 'phone' => $c['phone'] ?? null];
+        } else {
+            $head = ['label' => substr($key, 1) !== '' ? substr($key, 1) : 'Walk-in', 'gstin' => null, 'phone' => null];
+        }
+        $rows[] = $head + array_map(fn($v) => round($v, 2), $r);
+    }
+    return [$rows, array_map(fn($v) => round($v, 2), $totals)];
 }
 
 /** FROM source for the GST summary (stat_gst_daily, or the same columns from the bills). */

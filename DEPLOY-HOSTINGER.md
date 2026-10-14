@@ -251,7 +251,10 @@ Manager role ko *Suppliers & Purchases* apne aap mil jaata hai; Staff ko chahiye
 * Naya version upload karke **Update database** zaroor dabao: naye indexes + report summary tables bante hain.
   Data bahut bada ho (lakhs bills) to SSH se `cd public_html/billing/api && php database/migrate.php` chalao
   (browser timeout se bachne ke liye).
+  V4 speed update ke baad pehli baar report summaries dobara bante hain (6 lakh bills par lagbhag 1 minute).
 * **Cron job** (upar wala, har minute) report summaries ko bhi taaza rakhta hai — zaroor lagao.
+* Bills / Payments me "Patel" jaisa bahut common naam search karna ho to date range (is mahine / 3 mahine) rakho —
+  ye milliseconds me aata hai; "All time" par lakhs bills me common naam dhoondhne me ~1 second lag sakta hai.
 * hPanel → **Advanced → PHP Configuration**: PHP **8.3**, **OPcache ON**, `memory_limit` 256M.
 * `api/.env` me `DB_HOST=localhost` rakho (Hostinger ka MySQL usi server par hota hai — IP/remote host se slow hota hai).
 * Speed check: browser me F12 → Network → koi API request → **Timing** tab me `Server-Timing` dikhega

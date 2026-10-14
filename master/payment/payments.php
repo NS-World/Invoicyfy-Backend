@@ -29,7 +29,9 @@ if (!empty($_GET['to'])) {
      'via' => ['invoices', 'invoice_id', 'invoice_id', ['prefix' => ['invoice_number'], 'digits' => ['customer_phone'], 'text' => 'customer_name', 'short' => 'customer_name']]],
     "FROM payments p LEFT JOIN invoices i ON i.invoice_id = p.invoice_id WHERE $where", $params);
 $params = array_merge($joinParams, $params, $searchParams);
-$base = "FROM payments p$join LEFT JOIN invoices i ON i.invoice_id = p.invoice_id WHERE $where$searchWhere";
+// "Contains" search inside a date range: read the range through the date index (see invoices.php).
+$hint = $join === '' && $searchWhere !== '' && (!empty($_GET['from']) || !empty($_GET['to'])) ? ' FORCE INDEX (idx_payments_date, idx_payments_store_date)' : '';
+$base = "FROM payments p$hint$join LEFT JOIN invoices i ON i.invoice_id = p.invoice_id WHERE $where$searchWhere";
 
 if ($search === '' && stats_sync()) {
     // No search: count and per-mode totals come from the day summaries (same filters: store, mode, dates).
