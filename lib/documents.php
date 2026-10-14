@@ -283,3 +283,21 @@ function load_invoice(int $invoiceId): ?array
     $inv['hsn_summary'] = array_values($hsn);
     return $inv;
 }
+
+/**
+ * Customers with bills or orders are never removed from the database (their bills must stay intact):
+ * "delete" sets customers.deleted_at, which hides them from the customer list, search and messages.
+ * Returns the SQL condition for "not deleted" (empty before "Update database" adds the column).
+ */
+function customer_active_sql(string $alias = ''): string
+{
+    static $ready = null;
+    if ($ready === null) {
+        try {
+            $ready = (bool) db_one("SHOW COLUMNS FROM customers LIKE 'deleted_at'");
+        } catch (Throwable $e) {
+            $ready = false;
+        }
+    }
+    return $ready ? ' AND ' . ($alias !== '' ? "$alias." : '') . 'deleted_at IS NULL' : '';
+}

@@ -134,7 +134,7 @@ function wa_send_template(array $store, string $to, array $params, ?string $imag
  */
 function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp']): array
 {
-    $where = ['1=1'];
+    $where = ['1=1' . customer_active_sql('c')];
     $params = [];
     $type = strtoupper((string) ($a['customer_type'] ?? ''));
     if (in_array($type, ['B2C', 'B2B'], true)) {

@@ -4,7 +4,7 @@ allow_methods('GET');
 require_auth();
 
 [$page, $limit, $offset, $search] = pagination();
-$where = '1=1';
+$where = '1=1' . customer_active_sql('c');
 $params = [];
 if (!empty($_GET['customer_type'])) {
     $where .= " AND c.customer_type = ?";

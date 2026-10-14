@@ -103,6 +103,7 @@ return [
             'anniversary' => 'DATE NULL',
             'loyalty_points' => 'DECIMAL(12,2) NOT NULL DEFAULT 0',
             'last_reminder_at' => 'DATETIME NULL',
+            'deleted_at' => 'DATETIME NULL',
             'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
             'updated_at' => 'TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP',
         ],

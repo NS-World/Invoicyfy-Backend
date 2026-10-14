@@ -231,7 +231,7 @@ function job_birthday(array $store, array $auto, string $date, ?int $userId = nu
         if (!$message) {
             continue;
         }
-        $people = db_all("SELECT customer_id, name, phone, email FROM customers WHERE marketing_opt_in = 1 AND $field IS NOT NULL AND DATE_FORMAT($field, '%m-%d') IN ($in)", $mds);
+        $people = db_all("SELECT customer_id, name, phone, email FROM customers WHERE marketing_opt_in = 1" . customer_active_sql() . " AND $field IS NOT NULL AND DATE_FORMAT($field, '%m-%d') IN ($in)", $mds);
         if (!$people) {
             continue;
         }
@@ -268,7 +268,7 @@ function customers_with_dues(int $storeId, float $minAmount, int $minDays, ?arra
     return db_all(
         "SELECT c.customer_id, c.name, c.phone, c.email, c.last_reminder_at, SUM(i.balance_due) AS due, COUNT(*) AS bills, MIN(i.invoice_date) AS oldest
          FROM invoices i JOIN customers c ON c.customer_id = i.customer_id
-         WHERE i.status IN ('Unpaid','Partial') AND i.store_id = ? AND i.balance_due > 0 AND i.invoice_date <= ?$only
+         WHERE i.status IN ('Unpaid','Partial') AND i.store_id = ? AND i.balance_due > 0 AND i.invoice_date <= ?$only" . customer_active_sql('c') . "
          GROUP BY c.customer_id, c.name, c.phone, c.email, c.last_reminder_at HAVING due >= ? ORDER BY due DESC",
         $params
     );

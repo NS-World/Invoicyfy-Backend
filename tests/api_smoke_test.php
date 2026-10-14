@@ -237,7 +237,13 @@ check('staff cannot create users (403)', $c === 403, $r);
 check('staff can list invoices', $c === 200, $r);
 $token = $adminToken;
 [$c, $r] = call('DELETE', '/master/customer/delete-customer.php', ['customer_id' => $b2b]);
-check('cannot delete customer with invoices', $c === 409, $r);
+check('customer with invoices can be deleted (bills kept)', $c === 200, $r);
+[$c, $r] = call('GET', '/master/customer/customers.php?page=1&limit=100');
+check('deleted customer hidden from the list', $c === 200 && !in_array($b2b, array_column($r['data'], 'customer_id')), $r);
+[$c, $r] = call('GET', "/master/invoice/get-invoice-by-id.php?invoice_id=$inv2");
+check('old bill of deleted customer still opens', $c === 200 && $r['data']['customer_id'] === $b2b && $r['data']['customer_name'] !== '', $r);
+[$c, $r] = call('DELETE', '/master/customer/delete-customer.php', ['customer_id' => $b2b]);
+check('deleting again -> 404', $c === 404, $r);
 [$c, $r] = call('PUT', '/master/product/delete-product.php', ['product_id' => $p1]);
 check('used product deactivated not deleted', $c === 200 && str_contains($r['message'], 'Inactive'), $r);
 

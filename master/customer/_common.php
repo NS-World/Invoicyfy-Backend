@@ -54,13 +54,13 @@ function customer_payload(array $d): array
 function customer_duplicate_check(array $p, int $excludeId = 0): void
 {
     if ($p['phone']) {
-        $dup = db_value("SELECT customer_id FROM customers WHERE phone = ? AND customer_id <> ? LIMIT 1", [$p['phone'], $excludeId]);
+        $dup = db_value("SELECT customer_id FROM customers WHERE phone = ? AND customer_id <> ?" . customer_active_sql() . " LIMIT 1", [$p['phone'], $excludeId]);
         if ($dup) {
             fail('A customer with this phone number already exists', 409);
         }
     }
     if ($p['gstin']) {
-        $dup = db_value("SELECT customer_id FROM customers WHERE gstin = ? AND customer_id <> ? LIMIT 1", [$p['gstin'], $excludeId]);
+        $dup = db_value("SELECT customer_id FROM customers WHERE gstin = ? AND customer_id <> ?" . customer_active_sql() . " LIMIT 1", [$p['gstin'], $excludeId]);
         if ($dup) {
             fail('A customer with this GSTIN already exists', 409);
         }
