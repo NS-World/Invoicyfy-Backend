@@ -136,6 +136,10 @@ function endpoint_permission(string $script, string $method): ?array
     if ($area === 'master' && array_key_exists("$folder/$file", ENDPOINT_PERMISSION_OVERRIDES)) {
         return ENDPOINT_PERMISSION_OVERRIDES["$folder/$file"];
     }
+    if ($area === 'master' && $folder === 'archive') {
+        // Data & Archive (year archives, purge): Backup & Restore permission; every endpoint is Admin-only as well.
+        return ['backup', $method === 'GET' ? 'view' : 'add'];
+    }
     if ($area === 'reports') {
         return [$folder === 'dashboard' ? 'dashboard' : 'reports', 'view'];
     }

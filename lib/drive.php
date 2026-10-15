@@ -18,7 +18,9 @@ const DRIVE_DEFAULTS = [
     'refresh_token' => '',       // encrypted
     'email' => '',
     'folder_id' => '',
-    'keep' => 15,                // backups kept on Drive
+    'keep' => 30,                // nightly backups kept on Drive (folder FY xxxx-xx / daily)
+    'keep_monthly' => 12,        // month-start copies kept (folder FY xxxx-xx / monthly)
+    'folders' => [],             // Drive folder ids found / created (cache)
     'local_keep' => 5,           // backups kept on the server
     'last_run_at' => null,
     'last_result' => null,
@@ -40,7 +42,9 @@ function drive_public(array $s): array
     $out = $s;
     $out['client_secret_set'] = $s['client_secret'] !== '';
     $out['connected'] = $s['refresh_token'] !== '';
-    unset($out['client_secret'], $out['refresh_token']);
+    unset($out['client_secret'], $out['refresh_token'], $out['folders']);
+    $fy = (int) date('n') >= 4 ? (int) date('Y') : (int) date('Y') - 1;
+    $out['current_fy'] = sprintf('FY %d-%02d', $fy, ($fy + 1) % 100);
     $out['redirect_uri'] = drive_redirect_uri();
     $out['local_files'] = backup_local_files();
     return $out;
@@ -218,6 +222,7 @@ function drive_finish_connect(string $code): array
     [$c2, $about] = drive_http('GET', google_url('api') . '/about?fields=user(emailAddress)', ['Authorization: Bearer ' . $j['access_token']]);
     $s['email'] = $c2 === 200 ? (string) ($about['user']['emailAddress'] ?? '') : '';
     $s['folder_id'] = '';
+    $s['folders'] = [];
     drive_save($s);
     return $s;
 }
@@ -309,47 +314,28 @@ function drive_cleanup(string $token, string $folderId, int $keep): int
 }
 
 /**
- * Make a backup now: local file, then Google Drive when connected. Old copies are removed on both sides.
- * Returns ['ok' => bool, 'message' => ..., 'file' => name, 'drive' => bool].
+ * Make a backup now: written to the server, then uploaded to Google Drive (FY xxxx-xx / daily) when connected.
+ * Runs as a data job (lib/datajobs.php); small databases finish within this call, big ones continue in the
+ * background (cron / tick / Data & Archive screen). Returns ['ok', 'message', 'file', 'drive', 'job_id', 'running'].
  */
-function run_backup(?int $userId = null): array
+function run_backup(?int $userId = null, float $budget = 240.0): array
 {
-    $s = drive_settings();
-    $s['last_run_at'] = date('Y-m-d H:i:s');
-    $drive = false;
-    $file = null;
-    try {
-        [$path, $file, $counts] = backup_write_file();
-        $sizeMb = round(filesize($path) / 1048576, 2);
-        $msg = "Backup $file ($sizeMb MB, " . array_sum($counts) . ' records) saved on the server';
-        if ($s['refresh_token'] !== '') {
-            $token = drive_access_token($s);
-            $folder = drive_folder($token, $s);
-            drive_upload($token, $folder, $path, $file);
-            $removed = drive_cleanup($token, $folder, (int) $s['keep']);
-            $drive = true;
-            $msg .= ' and uploaded to Google Drive' . ($s['email'] ? " ({$s['email']})" : '') . ($removed ? ", $removed old backup(s) removed" : '');
-        }
-        foreach (array_slice(backup_local_files(), max(1, (int) $s['local_keep'])) as $old) {
-            @unlink(backup_dir() . '/' . $old['name']);
-        }
-        $s['last_result'] = $msg;
-        $s['last_ok'] = true;
-        $ok = true;
-    } catch (Throwable $e) {
-        $msg = 'Backup failed: ' . $e->getMessage() . ($file ? " (the file $file is still on the server)" : '');
-        $s['last_result'] = $msg;
-        $s['last_ok'] = false;
-        $ok = false;
-        error_log('[Invoicyfy backup] ' . $e->getMessage());
+    require_once __DIR__ . '/datajobs.php';
+    $id = data_job_queue('daily', null, $userId);
+    $deadline = microtime(true) + $budget;
+    do {
+        data_jobs_run(min(30.0, max(1.0, $deadline - microtime(true))));
+        $j = data_job($id);
+    } while ($j && in_array($j['status'], ['queued', 'running'], true) && microtime(true) < $deadline);
+    if (!$j) {
+        return ['ok' => false, 'message' => 'Backup could not start', 'file' => null, 'drive' => false, 'job_id' => $id, 'running' => false];
     }
-    drive_save($s);
-    try {
-        db_query('INSERT INTO backup_logs (action, user_id, file_name, summary) VALUES (?, ?, ?, ?)',
-            [$drive ? 'drive' : 'auto', $userId, $file, json_encode(['ok' => $ok, 'message' => $msg], JSON_UNESCAPED_UNICODE)]);
-    } catch (Throwable $e) {
+    if (in_array($j['status'], ['queued', 'running'], true)) {
+        return ['ok' => true, 'message' => 'Backup is running in the background (' . number_format($j['rows_done']) . ' records so far). It continues automatically.',
+            'file' => $j['file_name'], 'drive' => false, 'job_id' => $id, 'running' => true];
     }
-    return ['ok' => $ok, 'message' => $msg, 'file' => $file, 'drive' => $drive];
+    return ['ok' => $j['status'] === 'done', 'message' => $j['status'] === 'done' ? (string) $j['message'] : 'Backup failed: ' . preg_replace('/^Stopped: /', '', (string) $j['message']),
+        'file' => $j['file_name'], 'drive' => (bool) $j['drive_file_id'], 'job_id' => $id, 'running' => false];
 }
 
 /** Called by cron / the app's tick: once a day after the chosen time. */

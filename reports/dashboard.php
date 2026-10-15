@@ -30,10 +30,18 @@ $expenses = cast_numbers(db_one(
     "SELECT COALESCE(SUM(e.amount),0) AS total, COALESCE(SUM(e.tax_amount),0) AS tax FROM expenses e WHERE e.expense_date BETWEEN ? AND ? $se",
     array_merge([$from, $to], $sep)
 ), ['total', 'tax']);
+$frozen = stats_frozen_before();
 $outstanding = cast_numbers(db_one(
-    "SELECT COALESCE(SUM(s.balance),0) AS total, COALESCE(SUM(s.bills),0) AS invoices FROM $S s WHERE s.status IN ('Unpaid','Partial')$ss",
-    $ssp
+    "SELECT COALESCE(SUM(s.balance),0) AS total, COALESCE(SUM(s.bills),0) AS invoices FROM $S s WHERE s.status IN ('Unpaid','Partial')$ss" . ($frozen ? ' AND s.day >= ?' : ''),
+    array_merge($ssp, $frozen ? [$frozen] : [])
 ), ['total'], ['invoices']);
+if ($frozen) {
+    // Unpaid bills kept in purged years: their day summaries are frozen, so count them live (a handful of rows).
+    $old = db_one("SELECT COALESCE(SUM(i.balance_due),0) AS total, COUNT(*) AS invoices FROM invoices i WHERE i.status IN ('Unpaid','Partial') AND i.invoice_date < ? $si",
+        array_merge([$frozen], $sp));
+    $outstanding['total'] = round($outstanding['total'] + (float) $old['total'], 2);
+    $outstanding['invoices'] += (int) $old['invoices'];
+}
 // Overdue needs the due date: read from the (status, due_date) index, which only holds the few bills with one.
 $outstanding['overdue'] = money(db_value(
     "SELECT COALESCE(SUM(i.balance_due),0) FROM invoices i WHERE i.status IN ('Unpaid','Partial') AND i.due_date < CURDATE() $si",

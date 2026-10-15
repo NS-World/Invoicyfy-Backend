@@ -77,6 +77,13 @@ if ($search === '' && empty($_GET['customer_id']) && $status !== 'Overdue' && st
         $sw .= ' AND s.day <= ?';
         $sp[] = date_field($_GET, 'to');
     }
+    // Purged years: their day summaries are history; the few bills still kept there (unpaid) are counted live.
+    $frozen = stats_frozen_before();
+    $liveOld = $frozen && (empty($_GET['from']) || date_field($_GET, 'from') < $frozen);
+    if ($frozen) {
+        $sw .= ' AND s.day >= ?';
+        $sp[] = $frozen;
+    }
     $sql = "SELECT COALESCE(SUM(s.bills),0) AS total_rows,
                    COALESCE(SUM(CASE WHEN s.status <> 'Cancelled' THEN s.total END),0) AS total_amount,
                    COALESCE(SUM(CASE WHEN s.status <> 'Cancelled' THEN s.paid END),0) AS amount_paid,
@@ -94,6 +101,19 @@ if ($search === '' && empty($_GET['customer_id']) && $status !== 'Overdue' && st
     $sumParams = $params;
 }
 $summary = cast_numbers(db_one($sql, $sumParams), ['total_amount', 'amount_paid', 'balance_due', 'tax_amount'], ['total_rows']);
+if (!empty($liveOld)) {
+    $old = db_one(
+        "SELECT COUNT(*) AS total_rows, COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.total_amount END),0) AS total_amount,
+                COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.amount_paid END),0) AS amount_paid,
+                COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.balance_due END),0) AS balance_due,
+                COALESCE(SUM(CASE WHEN i.status <> 'Cancelled' THEN i.tax_amount END),0) AS tax_amount
+         FROM invoices i WHERE $where AND i.invoice_date < ?",
+        array_merge($params, [$frozen])
+    );
+    foreach (['total_rows', 'total_amount', 'amount_paid', 'balance_due', 'tax_amount'] as $k) {
+        $summary[$k] = $k === 'total_rows' ? $summary[$k] + (int) $old[$k] : round($summary[$k] + (float) $old[$k], 2);
+    }
+}
 $total = $summary['total_rows'];
 unset($summary['total_rows']);
 // One page of ids from the (store, date) / (date) index, then just those rows.

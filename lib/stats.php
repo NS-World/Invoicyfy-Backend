@@ -46,6 +46,22 @@ if (!function_exists('db_query')) {
     }
 }
 
+/**
+ * Days before this date were purged (Data & Archive): their summaries are history and are never recomputed
+ * (the bills behind them are gone). Null when nothing was purged.
+ */
+function stats_frozen_before(): ?string
+{
+    // Read every time (one tiny query): a purge in this same run must be seen by a rebuild after it.
+    try {
+        $raw = db_value("SELECT setting_value FROM app_settings WHERE setting_key = 'data_retention'");
+        $v = $raw ? (json_decode((string) $raw, true)['purged_before'] ?? null) : null;
+    } catch (Throwable $e) {
+        $v = null;
+    }
+    return $v ?: null;
+}
+
 /** Marks a store/day as changed. Never fails the caller (e.g. before "Update database" was pressed). */
 function stats_touch($storeId, $day): void
 {
@@ -227,7 +243,8 @@ function stats_refresh_day(int $storeId, string $day): void
     $pdo->beginTransaction();
     try {
         $claimed = db_query('DELETE FROM stat_dirty WHERE store_id = ? AND day = ?', [$storeId, $day])->rowCount();
-        if ($claimed) {
+        $frozen = stats_frozen_before();
+        if ($claimed && !($frozen && $day < $frozen)) {
             db_query('DELETE FROM stat_sales_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             db_query('DELETE FROM stat_items_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             db_query('DELETE FROM stat_payments_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
@@ -252,7 +269,8 @@ function stats_refresh_month(int $storeId, string $month): void
     global $pdo;
     $pdo->beginTransaction();
     try {
-        if (db_query('DELETE FROM stat_dirty_month WHERE store_id = ? AND month = ?', [$storeId, $month])->rowCount()) {
+        $frozen = stats_frozen_before();
+        if (db_query('DELETE FROM stat_dirty_month WHERE store_id = ? AND month = ?', [$storeId, $month])->rowCount() && !($frozen && $month < $frozen)) {
             stats_fill_month($storeId, $month);
         }
         $pdo->commit();
@@ -273,16 +291,24 @@ function stats_last_month_row(string $lastFull): string
 function stats_rebuild(): void
 {
     @set_time_limit(0);
-    foreach (['stat_sales_daily', 'stat_items_daily', 'stat_items_monthly', 'stat_customers_monthly', 'stat_gst_daily', 'stat_payments_daily', 'stat_staff_daily', 'stat_staff_pay_daily', 'stat_dirty', 'stat_dirty_month'] as $t) {
-        db_query("DELETE FROM $t");
+    // Purged years keep their summaries (history); everything from the first live day is rebuilt from the bills.
+    $frozen = stats_frozen_before();
+    foreach (['stat_sales_daily' => 'day', 'stat_items_daily' => 'day', 'stat_items_monthly' => 'month', 'stat_customers_monthly' => 'month', 'stat_gst_daily' => 'day',
+              'stat_payments_daily' => 'day', 'stat_staff_daily' => 'day', 'stat_staff_pay_daily' => 'day', 'stat_dirty' => 'day', 'stat_dirty_month' => 'month'] as $t => $col) {
+        db_query($frozen ? "DELETE FROM $t WHERE $col >= ?" : "DELETE FROM $t", $frozen ? [$frozen] : []);
     }
     $range = db_one('SELECT MIN(d) AS lo, MAX(d) AS hi FROM (SELECT MIN(invoice_date) AS d FROM invoices UNION ALL SELECT MAX(invoice_date) FROM invoices
                      UNION ALL SELECT MIN(payment_date) FROM payments UNION ALL SELECT MAX(payment_date) FROM payments) t');
     if ($range && $range['lo']) {
-        for ($y = (int) substr($range['lo'], 0, 4); $y <= (int) substr($range['hi'], 0, 4); $y++) {
-            stats_fill('i.invoice_date BETWEEN ? AND ?', ["$y-01-01", "$y-12-31"], 'p.payment_date BETWEEN ? AND ?', ["$y-01-01", "$y-12-31"]);
+        $lo = $frozen && $range['lo'] < $frozen ? $frozen : $range['lo'];
+        for ($y = (int) substr($lo, 0, 4); $y <= (int) substr($range['hi'], 0, 4); $y++) {
+            $from = max("$y-01-01", $frozen ?: "$y-01-01");
+            stats_fill('i.invoice_date BETWEEN ? AND ?', [$from, "$y-12-31"], 'p.payment_date BETWEEN ? AND ?', [$from, "$y-12-31"]);
             for ($m = 1; $m <= 12; $m++) {
-                stats_fill_month(null, sprintf('%d-%02d-01', $y, $m));
+                $month = sprintf('%d-%02d-01', $y, $m);
+                if (!$frozen || $month >= $frozen) {
+                    stats_fill_month(null, $month);
+                }
             }
         }
     }

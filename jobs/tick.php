@@ -16,10 +16,13 @@ release_stuck_recipients();
 foreach (array_column(db_all("SELECT campaign_id FROM campaigns WHERE status = 'Sending' AND channel = 'api' ORDER BY campaign_id LIMIT 3"), 'campaign_id') as $id) {
     process_campaign((int) $id, 10, microtime(true) + 10);
 }
-// V4: nightly backup (server copy + Google Drive) once a day after its time, after this answer is sent.
-require_once __DIR__ . '/../lib/drive.php';
-if (backup_due()) {
-    after_response(fn() => run_backup(), true);
-    $log[] = 'backup started';
+// Nightly backup, year archives and purge (lib/datajobs.php): queued once a night; worked on after this answer is sent.
+require_once __DIR__ . '/../lib/datajobs.php';
+if (data_nightly_queue()) {
+    $log[] = 'night jobs queued';
+}
+if (data_jobs_open()) {
+    after_response(fn() => data_jobs_run(20), true);
+    $log[] = 'data jobs running';
 }
 json_out(['status' => 'success', 'ran' => $log]);

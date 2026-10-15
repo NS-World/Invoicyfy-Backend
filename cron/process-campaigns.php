@@ -27,10 +27,14 @@ if (claim_job('stats_recheck', 0, date('Y-m-d'))) {
     }
 }
 stats_sync();
-// V4: nightly backup (server copy + Google Drive).
-require_once __DIR__ . '/../lib/drive.php';
-if (backup_due()) {
-    $jobs[] = run_backup()['message'];
+// Nightly backup, year archives and (when turned on) purge of old years: queued once a night, then worked on
+// a few seconds every minute until done (lib/datajobs.php).
+require_once __DIR__ . '/../lib/datajobs.php';
+if ($night = data_nightly_queue()) {
+    $jobs[] = 'night jobs queued: ' . count($night);
+}
+if (data_jobs_open()) {
+    $jobs[] = 'data jobs: ' . implode(',', data_jobs_run(25));
 }
 db_query("REPLACE INTO job_runs (job, store_id, run_date, ran_at, result) VALUES ('cron', 0, CURDATE(), NOW(), 'ok')");
 $released = release_stuck_recipients();

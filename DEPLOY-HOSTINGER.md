@@ -254,6 +254,31 @@ Manager role ko *Suppliers & Purchases* apne aap mil jaata hai; Staff ko chahiye
       naam aur amount rehta hai (bill / GST record nahi badalta).
     * Customer: uske saare bills, payments, orders, loyalty points, personal coupons aur messages bhi delete ho jaate hain.
 
+## Data & Archive (saal-wise Google Drive archive + purane saal hatana) — sirf Admin
+
+Menu → **Admin → Data & Archive**. Sab kuch screen se control hota hai:
+
+* **Google Drive folders** (Backup & Restore me ek baar Connect):
+  `Invoicyfy Backups / FY 2026-27 / daily` (last 30 raat), `/ monthly` (har mahine ka pehla backup, last 12),
+  aur 31 March ke baad us saal ka poora data ek file me: `FY 2026-27 / FY-2026-27-FINAL.json.gz` (hamesha rehta hai).
+* **Kitne saal app me rakhna hai**: 3 / 4 / 5 / 6 / 7 / 8 / 10 saal ya "kabhi mat hatao". Logs (activity / message)
+  ke liye alag: 3 / 6 / 12 / 24 / 36 mahine ya hamesha.
+* **Make archive** — saal ka FINAL file Drive par (size check ke saath). **Download** se PC par bhi copy rakh sakte ho.
+* **Remove year** — sirf keep period se purane saal, sabse purana pehle, aur tabhi jab uska archive Drive par safe ho.
+  Laal list me dikhta hai kya hatega; `PURGE` likhna padta hai. Udhaar (unpaid) bills, pending orders, open cash shift,
+  unpaid supplier bills kabhi nahi hat-te. Report me purane saal ka total (sale, GST) waisa hi rehta hai.
+* Kaam thoda-thoda chalta hai (cron har minute / app khula ho to / screen khuli ho to) — timeout nahi hota, beech me
+  ruk jaye to wahi se aage chalta hai. Har backup / archive / removal ka log screen par.
+* *Remove automatically* on karoge to har raat ek purana saal (archive safe hone ke baad) apne aap hatega. Default: off.
+* GST: bill records ~6 saal rakhne hote hain — Drive wali FINAL file wahi record hai, use delete mat karna.
+
+## Printer (Windows PC par pehle se install printer)
+
+Windows me jo printer apne driver ke saath install hai wo browser ki **USB** list me nahi aata (Windows use apne paas rakhta hai).
+Counter & Printer → Printer → **Windows PC: silent print** → **Download shortcut** → desktop par rakho, bill printer ko
+Windows ka *default printer* banao, aur app roz isi shortcut se kholo. Bill / KOT bina print window ke seedha print hote hain.
+(*Test print* se check karo. Shortcut Chrome ya Edge dono me chalta hai.)
+
 ## Speed (API fast rakhne ke liye)
 
 * Naya version upload karke **Update database** zaroor dabao: naye indexes + report summary tables bante hain.

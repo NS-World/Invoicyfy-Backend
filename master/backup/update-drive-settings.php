@@ -11,6 +11,7 @@ $s = drive_settings();
 $s['enabled'] = bool_field($d, 'enabled', $s['enabled']);
 $s['time'] = setting_time((string) ($d['time'] ?? $s['time']), 'Backup time');
 $s['keep'] = (int) setting_num($d['keep'] ?? $s['keep'], 1, 90, 'Backups kept on Drive');
+$s['keep_monthly'] = (int) setting_num($d['keep_monthly'] ?? $s['keep_monthly'], 1, 120, 'Monthly backups kept on Drive');
 $s['local_keep'] = (int) setting_num($d['local_keep'] ?? $s['local_keep'], 1, 30, 'Backups kept on the server');
 $clientId = trim((string) ($d['client_id'] ?? $s['client_id']));
 if ($clientId !== '' && !preg_match('/^[A-Za-z0-9._-]{10,200}\.apps\.googleusercontent\.com$/', $clientId)) {
@@ -20,6 +21,7 @@ if ($clientId !== $s['client_id']) {
     $s['refresh_token'] = ''; // a different Google app: connect again
     $s['email'] = '';
     $s['folder_id'] = '';
+    $s['folders'] = [];
 }
 $s['client_id'] = $clientId;
 $secret = trim((string) ($d['client_secret'] ?? ''));

@@ -53,11 +53,27 @@ if ($search === '' && stats_sync()) {
         $sw .= ' AND s.day <= ?';
         $sp[] = date_field($_GET, 'to');
     }
+    // Purged years: day summaries are history; payments still kept there (on unpaid bills) are counted live.
+    $frozen = stats_frozen_before();
+    if ($frozen) {
+        $sw .= ' AND s.day >= ?';
+        $sp[] = $frozen;
+    }
     $byMethod = array_map(
         fn($r) => cast_numbers($r, ['amount'], ['count']),
         db_all("SELECT s.method AS payment_method, SUM(s.all_count) AS count, SUM(s.all_amount) AS amount FROM stat_payments_daily s WHERE $sw
                 GROUP BY s.method HAVING count > 0 ORDER BY amount DESC", $sp)
     );
+    if ($frozen && (empty($_GET['from']) || date_field($_GET, 'from') < $frozen)) {
+        $merged = array_column($byMethod, null, 'payment_method');
+        foreach (db_all("SELECT p.payment_method, COUNT(*) AS count, SUM(p.amount) AS amount FROM payments p WHERE $where AND p.payment_date < ? GROUP BY p.payment_method",
+            array_merge($params, [$frozen])) as $r) {
+            $m = $r['payment_method'];
+            $merged[$m] = ['payment_method' => $m, 'count' => ($merged[$m]['count'] ?? 0) + (int) $r['count'], 'amount' => round(($merged[$m]['amount'] ?? 0) + (float) $r['amount'], 2)];
+        }
+        $byMethod = array_values($merged);
+        usort($byMethod, fn($a, $b) => $b['amount'] <=> $a['amount']);
+    }
     $total = (int) array_sum(array_column($byMethod, 'count'));
 } else {
     $byMethod = array_map(

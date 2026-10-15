@@ -400,15 +400,29 @@ for ($i = 0; $i < 3; $i++) {
 }
 check('backup uploaded to Drive', $c === 200 && str_contains($r['message'] ?? '', 'uploaded to Google Drive'), $r);
 [, $ms] = call('GET', "$mock/state", null, '');
-$live = array_values(array_filter($ms['files'], fn($f) => empty($f['folder']) && empty($f['deleted'])));
-check('only the newest 2 backups kept on Drive', count($live) === 2, $ms['files']);
+$folders = array_column(array_filter($ms['files'], fn($f) => !empty($f['folder'])), null, 'id');
+$fyName = sprintf('FY %d-%02d', (int) date('n') >= 4 ? (int) date('Y') : (int) date('Y') - 1, ((int) date('n') >= 4 ? (int) date('Y') + 1 : (int) date('Y')) % 100);
+$in = function (string $name) use ($ms, $folders, $fyName) {
+    return array_values(array_filter($ms['files'], function ($f) use ($folders, $name, $fyName) {
+        $p = $folders[$f['parents'][0] ?? ''] ?? null;
+        return empty($f['folder']) && empty($f['deleted']) && $p && $p['name'] === $name && ($folders[$p['parents'][0] ?? '']['name'] ?? '') === $fyName;
+    }));
+};
+check("Drive folders: Invoicyfy Backups / $fyName / daily + monthly", in_array('Invoicyfy Backups', array_column($folders, 'name'), true) && in_array($fyName, array_column($folders, 'name'), true)
+    && in_array('daily', array_column($folders, 'name'), true) && in_array('monthly', array_column($folders, 'name'), true), $folders);
+$live = $in('daily');
+check('only the newest 2 backups kept in daily', count($live) === 2, $ms['files']);
+check('one month-start copy in monthly', count($in('monthly')) === 1 && str_contains($in('monthly')[0]['name'] ?? '', date('Y-m')), $ms['files']);
 $up = $live[0] ?? [];
 check('uploaded file has the full size', ($up['size'] ?? 0) > 1000, $up);
 [$c, $r] = call('POST', '/jobs/tick.php', []);
 [, $r2] = call('GET', '/master/backup/drive-settings.php');
-check('nightly backup runs from the scheduler once a day', in_array('backup started', $r['ran'] ?? [], true) && ($r2['data']['last_ok'] ?? false), [$r, $r2['data']['last_result'] ?? null]);
+check('nightly backup runs from the scheduler once a day', in_array('night jobs queued', $r['ran'] ?? [], true), [$r, $r2['data']['last_result'] ?? null]);
+sleep(2);
+[, $r2] = call('GET', '/master/backup/drive-settings.php');
+check('... and finishes in the background', ($r2['data']['last_ok'] ?? false) && str_contains((string) ($r2['data']['last_result'] ?? ''), 'uploaded'), $r2['data']['last_result'] ?? null);
 [$c, $r] = call('POST', '/jobs/tick.php', []);
-check('... and not twice the same day', !in_array('backup started', $r['ran'] ?? [], true), $r);
+check('... and not twice the same day', !in_array('night jobs queued', $r['ran'] ?? [], true), $r);
 [$c, $r] = call('POST', '/master/backup/drive-disconnect.php', []);
 check('disconnect Drive', $c === 200 && !($r['data']['connected'] ?? true), $r);
 [, $r] = call('GET', '/master/backup/tables.php');

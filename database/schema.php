@@ -451,7 +451,7 @@ return [
             'completed_at' => 'DATETIME NULL',
         ],
         'constraints' => ['FOREIGN KEY (store_id) REFERENCES stores(store_id)'],
-        'indexes' => ['idx_campaigns_store' => '(store_id, created_at)'],
+        'indexes' => ['idx_campaigns_store' => '(store_id, created_at)', 'idx_campaigns_date' => '(created_at, campaign_id)'],
     ],
 
     'campaign_recipients' => [
@@ -505,7 +505,7 @@ return [
             'open_lock' => 'INT NULL',
         ],
         'constraints' => ['FOREIGN KEY (store_id) REFERENCES stores(store_id)'],
-        'indexes' => ['idx_cash_sessions_store' => '(store_id, opened_at)'],
+        'indexes' => ['idx_cash_sessions_store' => '(store_id, opened_at)', 'idx_cash_sessions_date' => '(opened_at, session_id)'],
         // Only one open session per store: open_lock = store_id while open, NULL once closed.
         'uniques' => ['uq_cash_sessions_open' => '(open_lock)'],
     ],
@@ -583,7 +583,7 @@ return [
             'FOREIGN KEY (coupon_id) REFERENCES coupons(coupon_id) ON DELETE CASCADE',
             'FOREIGN KEY (invoice_id) REFERENCES invoices(invoice_id) ON DELETE CASCADE',
         ],
-        'indexes' => ['idx_redemptions_coupon' => '(coupon_id, status)', 'idx_redemptions_customer' => '(customer_id)'],
+        'indexes' => ['idx_redemptions_coupon' => '(coupon_id, status)', 'idx_redemptions_customer' => '(customer_id)', 'idx_redemptions_date' => '(created_at, redemption_id)'],
     ],
 
     'loyalty_ledger' => [
@@ -600,7 +600,7 @@ return [
             'created_at' => 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
         ],
         'constraints' => ['FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE'],
-        'indexes' => ['idx_loyalty_customer' => '(customer_id, entry_id)', 'idx_loyalty_invoice' => '(invoice_id)'],
+        'indexes' => ['idx_loyalty_customer' => '(customer_id, entry_id)', 'idx_loyalty_invoice' => '(invoice_id)', 'idx_loyalty_date' => '(created_at, entry_id)'],
     ],
 
     'activity_log' => [
@@ -737,7 +737,7 @@ return [
             'FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id)',
             'FOREIGN KEY (purchase_id) REFERENCES purchases(purchase_id) ON DELETE SET NULL',
         ],
-        'indexes' => ['idx_supplier_payments_supplier' => '(supplier_id, payment_date)', 'idx_supplier_payments_store' => '(store_id, payment_date)', 'idx_supplier_payments_purchase' => '(purchase_id)'],
+        'indexes' => ['idx_supplier_payments_supplier' => '(supplier_id, payment_date)', 'idx_supplier_payments_store' => '(store_id, payment_date)', 'idx_supplier_payments_purchase' => '(purchase_id)', 'idx_supplier_payments_date' => '(payment_date, payment_id)'],
     ],
 
     'recipe_items' => [
@@ -986,6 +986,50 @@ return [
             'month' => 'DATE NOT NULL',
         ],
         'primary' => '(store_id, month)',
+    ],
+
+    // Long-term data care (lib/datajobs.php): nightly backup, year archives, purge of old years and logs.
+    'data_jobs' => [
+        'columns' => [
+            'job_id' => 'INT AUTO_INCREMENT',
+            'kind' => 'VARCHAR(20) NOT NULL',
+            'fy' => 'INT NULL',
+            'status' => "VARCHAR(20) NOT NULL DEFAULT 'queued'",
+            'stage' => 'VARCHAR(20) NULL',
+            'state' => 'MEDIUMTEXT NULL',
+            'rows_done' => 'BIGINT NOT NULL DEFAULT 0',
+            'rows_total' => 'BIGINT NOT NULL DEFAULT 0',
+            'file_name' => 'VARCHAR(150) NULL',
+            'file_size' => 'BIGINT NOT NULL DEFAULT 0',
+            'drive_file_id' => 'VARCHAR(100) NULL',
+            'counts' => 'TEXT NULL',
+            'message' => 'VARCHAR(1000) NULL',
+            'user_id' => 'INT NULL',
+            'created_at' => 'DATETIME NOT NULL',
+            'started_at' => 'DATETIME NULL',
+            'finished_at' => 'DATETIME NULL',
+            'updated_at' => 'DATETIME NULL',
+        ],
+        'primary' => '(job_id)',
+        'indexes' => ['idx_data_jobs_status' => '(status, job_id)', 'idx_data_jobs_kind' => '(kind, fy, job_id)'],
+    ],
+
+    'fy_archives' => [
+        'columns' => [
+            'fy' => 'INT NOT NULL',
+            'file_name' => 'VARCHAR(150) NOT NULL',
+            'file_size' => 'BIGINT NOT NULL DEFAULT 0',
+            'rows_total' => 'BIGINT NOT NULL DEFAULT 0',
+            'counts' => 'TEXT NULL',
+            'drive_file_id' => 'VARCHAR(100) NULL',
+            'drive_verified_at' => 'DATETIME NULL',
+            'downloaded_at' => 'DATETIME NULL',
+            'created_at' => 'DATETIME NOT NULL',
+            'job_id' => 'INT NULL',
+            'purged_at' => 'DATETIME NULL',
+            'purge_job_id' => 'INT NULL',
+        ],
+        'primary' => '(fy)',
     ],
 
     'job_runs' => [
