@@ -729,7 +729,9 @@ function purge_job_step(array $j, array $state, float $deadline): void
             $state['i']++;
             $state['cursor'] = [];
         }
-        data_job_save($j, $state, ['rows_done' => array_sum($state['counts']), 'counts' => $state['counts']]);
+        // Progress counts the records of the preview (bill lines go with their bills and are not in its total).
+        $main = array_filter($state['counts'], fn($k) => !str_ends_with($k, '_items'), ARRAY_FILTER_USE_KEY);
+        data_job_save($j, $state, ['rows_done' => array_sum($main), 'counts' => $state['counts']]);
     }
     if ($state['i'] < count($state['sections'])) {
         return;
@@ -744,7 +746,7 @@ function purge_job_step(array $j, array $state, float $deadline): void
     db_query('UPDATE fy_archives SET purged_at = NOW(), purge_job_id = ? WHERE fy = ?', [$j['job_id'], $fy]);
     $n = array_sum($state['counts']);
     data_job_finish($j, $state, 'done', fy_label($fy) . ' purged: ' . number_format($n) . ' old records removed. Unpaid bills, pending orders and unpaid supplier bills were kept.',
-        ['rows_done' => $n]);
+        ['rows_done' => $n, 'rows_total' => $n]);
 }
 
 /** Deletes one batch of a section. Returns [rows removed, next cursor, section finished]. */
