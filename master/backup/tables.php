@@ -7,6 +7,12 @@ $user = require_auth();
 
 $tables = [];
 $existing = array_flip(backup_existing_tables());
+// Exact counts for normal tables; tables with lakhs of rows use the database's own estimate (counting crores of
+// rows exactly takes seconds) and are marked "approx".
+$estimates = [];
+foreach (db_all('SELECT TABLE_NAME AS t, TABLE_ROWS AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()') as $r) {
+    $estimates[$r['t']] = (int) $r['n'];
+}
 foreach (BACKUP_TABLES as $table => $cfg) {
     if (!isset($existing[$table])) {
         continue;
@@ -17,7 +23,8 @@ foreach (BACKUP_TABLES as $table => $cfg) {
     $tables[] = [
         'table' => $table,
         'label' => $cfg['label'],
-        'count' => (int) db_value("SELECT COUNT(*) FROM `$table`"),
+        'count' => ($estimates[$table] ?? 0) > 300000 ? $estimates[$table] : (int) db_value("SELECT COUNT(*) FROM `$table`"),
+        'approx' => ($estimates[$table] ?? 0) > 300000,
         'columns' => array_keys(backup_columns($table)),
         'key' => $cfg['pk'],
     ];

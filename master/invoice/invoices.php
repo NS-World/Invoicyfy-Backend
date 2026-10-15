@@ -40,14 +40,14 @@ if (!empty($_GET['to'])) {
 
 // Search: "contains" on a small filtered set; on very large sets bill number / mobile "starts with",
 // exact GSTIN or customer name words (FULLTEXT index).
-[$join, $joinParams, $searchWhere, $searchParams] = list_search($search, 'invoices', 'invoice_id', 'i',
+[$join, $joinParams, $searchWhere, $searchParams, $searchFrom] = list_search($search, 'invoices', 'invoice_id', 'i',
     ['i.invoice_number', 'i.customer_name', 'i.customer_phone', 'i.customer_gstin'],
     ['prefix' => ['invoice_number'], 'digits' => ['customer_phone'], 'gstin' => 'customer_gstin', 'text' => 'customer_name', 'short' => 'customer_name'],
-    "FROM invoices i WHERE $where", $params);
+    "FROM invoices i WHERE $where", $params, 20000, ['col' => 'i.invoice_date', 'rows' => 30000, 'base' => "FROM invoices i WHERE $where"]);
 $params = array_merge($joinParams, $params, $searchParams);
 // "Contains" search inside a date range: read the range through the date index. (For a common word the optimizer
 // otherwise reads the whole table, which is several times slower than the few months asked for.)
-$hint = $join === '' && $searchWhere !== '' && (!empty($_GET['from']) || !empty($_GET['to'])) ? ' FORCE INDEX (idx_invoices_date, idx_invoices_store_date)' : '';
+$hint = $join === '' && $searchWhere !== '' && (!empty($_GET['from']) || !empty($_GET['to']) || $searchFrom) ? ' FORCE INDEX (idx_invoices_date, idx_invoices_store_date)' : '';
 $base = "FROM invoices i$hint$join WHERE $where$searchWhere";
 
 $status = (string) ($_GET['status'] ?? '');
@@ -130,4 +130,4 @@ $rows = rows_in_order(
 );
 $rows = array_map(fn($r) => doc_cast($r) + ['is_overdue' => (bool) $r['is_overdue']], $rows);
 
-json_out(["status" => "success", "page" => $page, "limit" => $limit, "total" => $total, "summary" => $summary, "data" => $rows]);
+json_out(["status" => "success", "page" => $page, "limit" => $limit, "total" => $total, "summary" => $summary, "data" => $rows, "search_from" => $searchFrom]);

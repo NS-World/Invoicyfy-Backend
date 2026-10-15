@@ -23,14 +23,14 @@ if (!empty($_GET['to'])) {
     $where .= ' AND p.payment_date <= ?';
     $params[] = date_field($_GET, 'to');
 }
-[$join, $joinParams, $searchWhere, $searchParams] = list_search($search, 'payments', 'payment_id', 'p',
+[$join, $joinParams, $searchWhere, $searchParams, $searchFrom] = list_search($search, 'payments', 'payment_id', 'p',
     ['i.invoice_number', 'i.customer_name', 'p.reference_no'],
     ['prefix' => ['reference_no'],
      'via' => ['invoices', 'invoice_id', 'invoice_id', ['prefix' => ['invoice_number'], 'digits' => ['customer_phone'], 'text' => 'customer_name', 'short' => 'customer_name']]],
-    "FROM payments p LEFT JOIN invoices i ON i.invoice_id = p.invoice_id WHERE $where", $params);
+    "FROM payments p LEFT JOIN invoices i ON i.invoice_id = p.invoice_id WHERE $where", $params, 20000, ['col' => 'p.payment_date', 'rows' => 30000, 'base' => "FROM payments p WHERE $where"]);
 $params = array_merge($joinParams, $params, $searchParams);
 // "Contains" search inside a date range: read the range through the date index (see invoices.php).
-$hint = $join === '' && $searchWhere !== '' && (!empty($_GET['from']) || !empty($_GET['to'])) ? ' FORCE INDEX (idx_payments_date, idx_payments_store_date)' : '';
+$hint = $join === '' && $searchWhere !== '' && (!empty($_GET['from']) || !empty($_GET['to']) || $searchFrom) ? ' FORCE INDEX (idx_payments_date, idx_payments_store_date)' : '';
 $base = "FROM payments p$hint$join LEFT JOIN invoices i ON i.invoice_id = p.invoice_id WHERE $where$searchWhere";
 
 if ($search === '' && stats_sync()) {
@@ -92,7 +92,7 @@ $rows = rows_in_order(
 );
 
 json_out([
-    "status" => "success", "page" => $page, "limit" => $limit, "total" => $total,
+    "status" => "success", "page" => $page, "limit" => $limit, "total" => $total, "search_from" => $searchFrom,
     "summary" => ["total_amount" => round(array_sum(array_column($byMethod, 'amount')), 2), "by_method" => $byMethod],
     "data" => array_map('doc_cast', $rows),
 ]);

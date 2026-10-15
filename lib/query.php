@@ -158,26 +158,44 @@ function rows_in_order(string $sql, array $ids, string $pk, array $params = []):
  *   $spec       see search_matchers()
  * Returns [joinSql, joinParams, whereSql, whereParams]; SQL order is "FROM t alias{join} WHERE base{where}".
  */
-function list_search(string $search, string $table, string $pk, string $alias, array $likeCols, array $spec, string $baseSql, array $baseParams, int $threshold = 20000): array
+function list_search(string $search, string $table, string $pk, string $alias, array $likeCols, array $spec, string $baseSql, array $baseParams, int $threshold = 20000, ?array $window = null): array
 {
     $search = trim(mb_substr($search, 0, 100));
     if ($search === '') {
-        return ['', [], '', []];
+        return ['', [], '', [], null];
     }
     $like = '%' . addcslashes($search, '%_\\') . '%';
     $contains = [' AND (' . implode(' OR ', array_map(fn($c) => "$c LIKE ?", $likeCols)) . ')', array_fill(0, count($likeCols), $like)];
     $rows = (int) db_value('SELECT COUNT(*) FROM (SELECT 1 ' . $baseSql . ' LIMIT ' . ($threshold + 1) . ') t', $baseParams);
     if ($rows <= $threshold) {
-        return ['', [], ...$contains];
+        return ['', [], ...$contains, null];
+    }
+    if ($window) {
+        // Dated lists (bills, payments...) on a big shop. A bill number / phone (has a digit) is looked up in the
+        // indexes over all years. A name is checked row by row, so when the chosen range holds more than
+        // $window['rows'] rows only the newest ones are searched and the reply says from which date (choosing an
+        // older date range searches further back). The cut-off date is read from the main table's date index only.
+        if (preg_match('/\d/', $search) && search_match_estimate($search, $table, $spec) <= 5000) {
+            [$join, $params] = search_join($search, $table, $pk, $alias, $spec);
+            return [$join, $params, '', [], null];
+        }
+        $limit = (int) ($window['rows'] ?? 30000);
+        $wSql = $window['base'] ?? $baseSql;
+        $col = $window['col'];
+        $from = db_value("SELECT $col $wSql ORDER BY $col DESC LIMIT 1 OFFSET $limit", $baseParams);
+        if ($from !== null) {
+            return ['', [], $contains[0] . " AND $col >= ?", array_merge($contains[1], [$from]), substr((string) $from, 0, 10)];
+        }
+        return ['', [], ...$contains, null];
     }
     // A very common word (a surname on thousands of bills): the index finds every match of all time and each one
     // must then be read and checked against the other filters. Checking the rows of the filters (e.g. a date range)
     // directly is cheaper then. The quick capped counts below tell the two cases apart.
     if (search_match_estimate($search, $table, $spec) > 5000) {
-        return ['', [], ...$contains];
+        return ['', [], ...$contains, null];
     }
     [$join, $params] = search_join($search, $table, $pk, $alias, $spec);
-    return [$join, $params, '', []];
+    return [$join, $params, '', [], null];
 }
 
 /** Matches of the indexed search conditions, counted only up to $cap per condition (each count stops early). */
