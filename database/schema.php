@@ -980,6 +980,14 @@ return [
         'primary' => '(store_id, day)',
     ],
 
+    'stat_dirty_month' => [
+        'columns' => [
+            'store_id' => 'INT NOT NULL',
+            'month' => 'DATE NOT NULL',
+        ],
+        'primary' => '(store_id, month)',
+    ],
+
     'job_runs' => [
         'columns' => [
             'job' => 'VARCHAR(40) NOT NULL',

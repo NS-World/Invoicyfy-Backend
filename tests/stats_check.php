@@ -38,6 +38,10 @@ if (!stats_sync()) {
     fwrite(STDERR, "Summaries are not available (run php database/migrate.php first)\n");
     exit(1);
 }
+// Month rows of the running month are rebuilt once the month is over; do that now so they can be compared.
+foreach (db_all('SELECT store_id, month FROM stat_dirty_month') as $d) {
+    stats_refresh_month((int) $d['store_id'], $d['month']);
+}
 $incremental = $snapshot();
 $dirty = (int) db_value('SELECT COUNT(*) FROM stat_dirty');
 stats_rebuild();

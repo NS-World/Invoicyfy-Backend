@@ -5,3 +5,4 @@
 /uploads/offers/*
 !/uploads/offers/.gitkeep
 /storage/backups/
+/storage/cache/

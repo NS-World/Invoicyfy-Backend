@@ -99,7 +99,7 @@ function stats_sync(): bool
     }
     try {
         if (!stats_ready()) {
-            if (!db_value("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stat_staff_pay_daily'")) {
+            if (!db_value("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stat_dirty_month'")) {
                 return $synced = false; // "Update database" not pressed yet: it creates the tables and builds them
             }
             // Small databases are built on the spot; big ones are built by "Update database" / cron.
@@ -112,6 +112,13 @@ function stats_sync(): bool
         $deadline = microtime(true) + 20;
         foreach (db_all('SELECT store_id, day FROM stat_dirty ORDER BY day DESC LIMIT 400') as $d) {
             stats_refresh_day((int) $d['store_id'], $d['day']);
+            if (microtime(true) > $deadline) {
+                break;
+            }
+        }
+        // Month rows are only read for months that are over; the running month is read from the day rows.
+        foreach (db_all('SELECT store_id, month FROM stat_dirty_month WHERE month < ? ORDER BY month DESC LIMIT 24', [date('Y-m-01')]) as $d) {
+            stats_refresh_month((int) $d['store_id'], $d['month']);
             if (microtime(true) > $deadline) {
                 break;
             }
@@ -228,7 +235,9 @@ function stats_refresh_day(int $storeId, string $day): void
             db_query('DELETE FROM stat_staff_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             db_query('DELETE FROM stat_staff_pay_daily WHERE store_id = ? AND day = ?', [$storeId, $day]);
             stats_fill('i.store_id = ? AND i.invoice_date = ?', [$storeId, $day], 'COALESCE(p.store_id, 0) = ? AND p.payment_date = ?', [$storeId, $day]);
-            stats_fill_month($storeId, substr($day, 0, 7) . '-01');
+            // Month rows are rebuilt later, only for months that are over (see stats_sync): a sale today never
+            // pays for re-adding the whole month.
+            db_query('INSERT IGNORE INTO stat_dirty_month (store_id, month) VALUES (?, ?)', [$storeId, substr($day, 0, 7) . '-01']);
         }
         $pdo->commit();
     } catch (Throwable $e) {
@@ -237,11 +246,34 @@ function stats_refresh_day(int $storeId, string $day): void
     }
 }
 
+/** Rebuilds the month rows of one store/month (claims the dirty row first). */
+function stats_refresh_month(int $storeId, string $month): void
+{
+    global $pdo;
+    $pdo->beginTransaction();
+    try {
+        if (db_query('DELETE FROM stat_dirty_month WHERE store_id = ? AND month = ?', [$storeId, $month])->rowCount()) {
+            stats_fill_month($storeId, $month);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/** Last whole month that may be read from the month rows: never the running month (it is still changing). */
+function stats_last_month_row(string $lastFull): string
+{
+    $prev = date('Y-m-01', strtotime(date('Y-m-01') . ' -1 month'));
+    return $lastFull > $prev ? $prev : $lastFull;
+}
+
 /** Recomputes everything, a year at a time (fine for millions of bills; run by "Update database"). */
 function stats_rebuild(): void
 {
     @set_time_limit(0);
-    foreach (['stat_sales_daily', 'stat_items_daily', 'stat_items_monthly', 'stat_customers_monthly', 'stat_gst_daily', 'stat_payments_daily', 'stat_staff_daily', 'stat_staff_pay_daily', 'stat_dirty'] as $t) {
+    foreach (['stat_sales_daily', 'stat_items_daily', 'stat_items_monthly', 'stat_customers_monthly', 'stat_gst_daily', 'stat_payments_daily', 'stat_staff_daily', 'stat_staff_pay_daily', 'stat_dirty', 'stat_dirty_month'] as $t) {
         db_query("DELETE FROM $t");
     }
     $range = db_one('SELECT MIN(d) AS lo, MAX(d) AS hi FROM (SELECT MIN(invoice_date) AS d FROM invoices UNION ALL SELECT MAX(invoice_date) FROM invoices
@@ -281,7 +313,7 @@ function stats_items_parts(string $from, string $to, ?int $scope): array
     $cols = 'store_id, product_id, product_name, unit, gst_rate, qty, taxable, cgst, sgst, igst, tax, line_total, cost, bills';
     [$st, $sp] = stats_store($scope, 'd');
     $firstFull = substr($from, 8, 2) === '01' ? $from : date('Y-m-01', strtotime(substr($from, 0, 7) . '-01 +1 month'));
-    $lastFull = $to === date('Y-m-t', strtotime($to)) ? substr($to, 0, 7) . '-01' : date('Y-m-01', strtotime(substr($to, 0, 7) . '-01 -1 month'));
+    $lastFull = stats_last_month_row($to === date('Y-m-t', strtotime($to)) ? substr($to, 0, 7) . '-01' : date('Y-m-01', strtotime(substr($to, 0, 7) . '-01 -1 month')));
     if ($firstFull > $lastFull) {
         return [["SELECT $cols FROM stat_items_daily d WHERE d.day BETWEEN ? AND ?$st"], [array_merge([$from, $to], $sp)]];
     }
@@ -427,7 +459,7 @@ function customers_parts(string $from, string $to, ?int $scope): array
         return [[$live . $st], [array_merge([$from, $to], $sp)]];
     }
     $firstFull = substr($from, 8, 2) === '01' ? $from : date('Y-m-01', strtotime(substr($from, 0, 7) . '-01 +1 month'));
-    $lastFull = $to === date('Y-m-t', strtotime($to)) ? substr($to, 0, 7) . '-01' : date('Y-m-01', strtotime(substr($to, 0, 7) . '-01 -1 month'));
+    $lastFull = stats_last_month_row($to === date('Y-m-t', strtotime($to)) ? substr($to, 0, 7) . '-01' : date('Y-m-01', strtotime(substr($to, 0, 7) . '-01 -1 month')));
     if ($firstFull > $lastFull) {
         return [[$live . $st], [array_merge([$from, $to], $sp)]];
     }

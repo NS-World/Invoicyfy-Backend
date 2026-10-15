@@ -201,3 +201,25 @@ function search_match_estimate(string $search, string $table, array $spec, int $
     }
     return $n;
 }
+
+/**
+ * Small values that are slow to count on big tables (e.g. "how many customers") kept for $ttl seconds in a
+ * file under storage/cache (web access denied). Falls back to computing every time when the folder is not writable.
+ */
+function cached(string $key, int $ttl, callable $compute)
+{
+    $dir = __DIR__ . '/../storage/cache';
+    $file = $dir . '/' . preg_replace('/[^a-z0-9_.-]/i', '_', $key) . '.json';
+    if (is_file($file) && filemtime($file) > time() - $ttl) {
+        $v = json_decode((string) @file_get_contents($file), true);
+        if (is_array($v) && array_key_exists('v', $v)) {
+            return $v['v'];
+        }
+    }
+    $value = $compute();
+    if (is_dir($dir) || @mkdir($dir, 0750, true)) {
+        @file_put_contents($file . '.tmp', json_encode(['v' => $value]));
+        @rename($file . '.tmp', $file);
+    }
+    return $value;
+}

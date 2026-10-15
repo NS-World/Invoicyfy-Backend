@@ -41,9 +41,10 @@ $outstanding['overdue'] = money(db_value(
 ));
 
 $counts = [
-    'customers' => (int) db_value("SELECT COUNT(*) FROM customers WHERE 1=1" . customer_active_sql()),
+    // Counting lakhs of customers / orders takes a moment: kept for a minute (the sale figures above are always live).
+    'customers' => (int) cached('dash_customers', 60, fn() => (int) db_value("SELECT COUNT(*) FROM customers WHERE 1=1" . customer_active_sql())),
     'products' => (int) db_value("SELECT COUNT(*) FROM products pr WHERE pr.status = 'Active' $spr", $sprp),
-    'open_orders' => (int) db_value("SELECT COUNT(*) FROM orders o WHERE o.status IN ('Pending','Approved') $so", $sop),
+    'open_orders' => (int) cached('dash_open_orders_' . ($scope ?? 'all'), 60, fn() => (int) db_value("SELECT COUNT(*) FROM orders o WHERE o.status IN ('Pending','Approved') $so", $sop)),
     'low_stock' => (int) db_value("SELECT COUNT(*) FROM products pr WHERE pr.track_inventory = 1 AND pr.status = 'Active' AND pr.stock_qty <= pr.low_stock_threshold $spr", $sprp),
 ];
 

@@ -246,6 +246,14 @@ Manager role ko *Suppliers & Purchases* apne aap mil jaata hai; Staff ko chahiye
       warna jab app pehli baar khule tab us din ka backup ho jaata hai.
     * Backup file server par bhi rehti hai (`api/storage/backups`, web se band) aur wahi se download / restore hoti hai.
 
+11. **Inventory → Add inventory** — saare products ki list; jo maal aaya uski quantity (aur cost) bharo, note likho
+    (supplier / bill no), *Save stock*. Save ke baad har product ka naya stock aur status (In stock / Low / Out) dikhta hai.
+12. **Delete (Product / Customer)** — delete dabane par laal box me dikhta hai ki saath me kya-kya delete hoga;
+    `DELETE` likh ke hi delete hota hai.
+    * Product: stock history, batches, recipe lines delete; us item wale combo offers band. Purane bills me item ka
+      naam aur amount rehta hai (bill / GST record nahi badalta).
+    * Customer: uske saare bills, payments, orders, loyalty points, personal coupons aur messages bhi delete ho jaate hain.
+
 ## Speed (API fast rakhne ke liye)
 
 * Naya version upload karke **Update database** zaroor dabao: naye indexes + report summary tables bante hain.
