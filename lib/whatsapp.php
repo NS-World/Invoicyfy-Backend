@@ -132,7 +132,11 @@ function wa_send_template(array $store, string $to, array $params, ?string $imag
  * Customers matching an audience filter, as one recipient per channel: WhatsApp / SMS need a usable mobile number,
  * Email a valid address. Customers who opted out of offers are never included.
  */
-function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp']): array
+/**
+ * Who gets a campaign. $preview: only the counts and the first 8 people (the audience screen) — no full recipient list,
+ * which on lakhs of customers is most of the time and memory.
+ */
+function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp'], bool $preview = false): array
 {
     $where = ['1=1' . customer_active_sql('c')];
     $params = [];
@@ -170,6 +174,7 @@ function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp'
     $channels = array_values(array_intersect(['whatsapp', 'sms', 'email'], $channels)) ?: ['whatsapp'];
     $out = ['recipients' => [], 'opted_out' => 0, 'no_phone' => 0, 'no_email' => 0, 'matched' => count($rows), 'counts' => array_fill_keys($channels, 0)];
     $seen = [];
+    $out['people'] = 0;
     foreach ($rows as $r) {
         if (!(int) $r['marketing_opt_in']) {
             $out['opted_out']++;
@@ -184,6 +189,7 @@ function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp'
         if (in_array('email', $channels, true) && !$email) {
             $out['no_email']++;
         }
+        $reached = false;
         foreach ($channels as $ch) {
             $to = $ch === 'email' ? $email : $phone;
             if (!$to || isset($seen["$ch|$to"])) {
@@ -191,9 +197,13 @@ function campaign_audience(array $a, int $storeId, array $channels = ['whatsapp'
             }
             $seen["$ch|$to"] = true;
             $out['counts'][$ch]++;
-            $out['recipients'][] = ['customer_id' => (int) $r['customer_id'], 'name' => $r['name'], 'channel' => $ch,
-                'phone' => $ch === 'email' ? null : $phone, 'email' => $ch === 'email' ? $email : null];
+            $reached = true;
+            if (!$preview || $out['people'] < 8) {
+                $out['recipients'][] = ['customer_id' => (int) $r['customer_id'], 'name' => $r['name'], 'channel' => $ch,
+                    'phone' => $ch === 'email' ? null : $phone, 'email' => $ch === 'email' ? $email : null];
+            }
         }
+        $out['people'] += $reached ? 1 : 0;
     }
     return $out;
 }

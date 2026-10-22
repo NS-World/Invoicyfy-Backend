@@ -6,15 +6,15 @@ allow_methods('GET');
 $user = require_auth();
 $storeId = write_store($user, $_GET['store_id'] ?? null);
 $channels = array_filter(explode(',', (string) ($_GET['channels'] ?? 'whatsapp')));
-$a = campaign_audience($_GET, $storeId, $channels);
+$a = campaign_audience($_GET, $storeId, $channels, true);
 $cities = db_all("SELECT city, COUNT(*) AS n FROM customers WHERE city IS NOT NULL AND city <> '' GROUP BY city ORDER BY n DESC LIMIT 50");
 $people = [];
 foreach ($a['recipients'] as $r) {
     $people[$r['customer_id']] = $people[$r['customer_id']] ?? $r;
 }
 json_out(['status' => 'success', 'data' => [
-    'count' => count($people),
-    'messages' => count($a['recipients']),
+    'count' => $a['people'],
+    'messages' => (int) array_sum($a['counts']),
     'counts' => $a['counts'],
     'matched' => $a['matched'],
     'opted_out' => $a['opted_out'],
