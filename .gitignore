@@ -6,3 +6,5 @@
 !/uploads/offers/.gitkeep
 /storage/backups/
 /storage/cache/
+/storage/saas/
+/storage/tenants/

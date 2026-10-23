@@ -57,7 +57,7 @@ function drive_redirect_uri(): string
 
 function backup_dir(): string
 {
-    $dir = __DIR__ . '/../storage/backups';
+    $dir = env('STORAGE_DIR', __DIR__ . '/../storage') . '/backups';
     if (!is_dir($dir)) {
         @mkdir($dir, 0750, true);
     }

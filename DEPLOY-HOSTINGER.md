@@ -1,4 +1,4 @@
-# Invoicyfy ko Hostinger par live karna
+# Khanak (pehle Invoicyfy) ko Hostinger par live karna
 
 Example address: **https://billing.scoopiez.in**. Aap koi aur naam bhi rakh sakte ho, jaise `app.scoopiez.in`.
 Web app aur API ek hi address par chalte hain: app `/` par aur API `/api/` par. Isliye CORS ka koi jhanjhat nahi.
@@ -299,6 +299,128 @@ Windows ka *default printer* banao, aur app roz isi shortcut se kholo. Bill / KO
 * App: **Backup & Restore → Automatic backup every night** + Google Drive (Version 4) on rakho.
   Saath me **Download full backup** (Excel) mahine me ek baar pen drive me.
 * Hostinger: **Files → Backups** me daily/weekly server backups bhi milte hain.
+
+## Khanak SaaS — plan bechna, payment, har dukaan ka alag account
+
+Is mode me Khanak ek product ki tarah bikta hai: koi bhi dukaan **/pricing** par plan dekhe → **/signup** par
+details bhare → free trial ya Razorpay se payment → turant uski dukaan (alag database) ban jaati hai aur screen
+par + email me **shop code, email, password** milta hai → **/login** par shop code ke saath login.
+`SAAS_MODE` band ho (default) to app bilkul pehle jaisa ek-dukaan wala chalta hai — shop code field, plan menu,
+sign-up kuch nahi dikhta.
+
+| Plan | Saal | Mahina | Users | Stores | Kya extra |
+|---|---|---|---|---|---|
+| Starter | ₹2,999 | ₹299 | 2 | 1 | Billing, stock, reports, backup |
+| Growth | ₹5,999 | ₹599 | 5 | 1 | + Orders/KOT, udhaar/loyalty, offers, purchases |
+| Pro | ₹11,999 | ₹1,199 | 15 | 3 | + Recipes, combo, online orders, owner/staff report, GSTR-1 |
+| Chain | ₹9,999 / store | — | ∞ | jitne kharide | Sab kuch |
+
+Sab par 18% GST alag. Free trial 14 din. Plan khatam → 7 din grace (banner) → phir app *read-only*
+(dekh / export kar sakte ho, naya bill save nahi). Data kabhi delete nahi hota. Daam aur features
+**/khanak-admin → Plans** se badal sakte ho.
+
+### Server kaunsa?
+
+Har dukaan ka apna MySQL database banta hai, isliye app ko `CREATE DATABASE` ki permission chahiye.
+**Hostinger VPS** (ya koi bhi VPS) best hai. Shared hosting (hPanel) par app khud database nahi bana sakta;
+wahan pehle se khaali databases bana ke `SAAS_DB_POOL` me likh sakte ho — lekin tabhi chalega jab **ek hi
+MySQL user** (`DB_USER`) un sab databases ko khol sake. Hostinger shared par har database ka alag user hota
+hai, isliye SaaS ke liye VPS lo.
+
+### 1. `.env` me ye jodo
+
+```
+SAAS_MODE=true
+SAAS_DB_NAME=khanak_control          # control database: plans, dukaanein, payments, invoices
+SAAS_DB_PREFIX=khanak_t_             # har dukaan: khanak_t_<shop_code>
+# SAAS_DB_POOL=u123_shop1,u123_shop2 # sirf jab app database nahi bana sakta
+SAAS_MASTER_KEY=<64 hex>             # php -r "echo bin2hex(random_bytes(32));"  — kabhi mat badlo
+SAAS_PUBLIC_URL=https://app.khanak.in   # site ka address (API = /api)
+
+SAAS_PAYMENT_MODE=razorpay           # test ke liye: mock (koi paisa nahi katta)
+SAAS_RAZORPAY_KEY_ID=rzp_live_xxx
+SAAS_RAZORPAY_KEY_SECRET=xxx
+SAAS_RAZORPAY_WEBHOOK_SECRET=xxx
+
+SAAS_TRIAL_DAYS=14                   # 0 = free trial band
+SAAS_GRACE_DAYS=7
+SAAS_GST_RATE=18
+SAAS_SIGNUP_LIMIT=20                 # ek IP se ghante me kitne sign-up
+
+# Khanak ke apne GST invoice (KH/26-27/0001) par
+SAAS_SELLER_NAME=Khanak
+SAAS_SELLER_GSTIN=24XXXXXXXXXXXZX
+SAAS_SELLER_ADDRESS=Surat, Gujarat
+SAAS_SELLER_STATE_CODE=24
+SAAS_SAC_CODE=998314
+SAAS_INVOICE_PREFIX=KH
+
+# Login details / receipt / reminder email
+SAAS_SMTP_HOST=smtp.hostinger.com
+SAAS_SMTP_PORT=465
+SAAS_SMTP_SECURE=ssl
+SAAS_SMTP_USER=hello@khanak.in
+SAAS_SMTP_PASS=xxx
+SAAS_MAIL_FROM=hello@khanak.in
+SAAS_MAIL_FROM_NAME=Khanak
+SAAS_SUPPORT_PHONE=+91 98xxxxxxx
+SAAS_SUPPORT_EMAIL=support@khanak.in
+```
+
+`DB_USER` ko `CREATE DATABASE` + `khanak_%` databases par poori permission chahiye:
+`GRANT ALL ON \`khanak\_%\`.* TO 'khanak'@'localhost';`
+
+### 2. Control database + super admin (ek baar, SSH)
+
+```
+cd ~/…/public_html/api
+php saas/cli/setup.php --admin-email=you@khanak.in --admin-password='Strong@Pass1' --admin-name="Nirav"
+```
+
+Super admin console: **https://app.khanak.in/khanak-admin** — revenue (MRR/ARR), dukaanein, din jodna,
+plan badalna, cash/bank payment entry + invoice, dukaan hold / chalu, payments, plans ke daam.
+
+### 3. Razorpay
+
+Dashboard → Settings → **API Keys** (key id + secret `.env` me) → **Webhooks** → Add:
+URL `https://app.khanak.in/api/saas/webhook.php`, event **payment.captured**, secret = `SAAS_RAZORPAY_WEBHOOK_SECRET`.
+Webhook isliye zaroori hai ki customer payment ke baad page band kar de tab bhi dukaan ban jaaye aur email jaaye.
+
+### 4. Cron (har minute) — purane cron ki jagah
+
+```
+* * * * * /usr/bin/php /home/<user>/…/public_html/api/saas/cli/cron-all.php
+```
+
+Ye har dukaan ke offers / automatic messages chalata hai, aur din me ek baar plan khatam hone ke reminder
+(7, 3, 1 din pehle aur 1 din baad) bhejta hai.
+
+### 5. Naya version upload karne ke baad
+
+Sab dukaanon ke database ek saath update:
+
+```
+php saas/cli/migrate-all.php
+```
+
+### Dukaan ka flow (customer ki taraf se)
+
+1. **/pricing** → plan chuno → *Buy* ya *Start free trial*.
+2. **/signup** → dukaan ka naam, malik, mobile, email, shop code (naam se apne aap ban jaata hai).
+3. Payment (UPI / card / net banking) → **Your shop is ready!** — shop code, email, password (copy button) +
+   wahi email me. Khanak ka GST invoice bhi email me.
+4. **Log in to Khanak** → shop code pehle se bhara → dashboard. Andar **Admin → Plan & billing** me plan,
+   users/stores ka use, renew / upgrade (Razorpay), aur sab invoices.
+
+### Dhyan rakho
+
+* **Google Drive backup**: har dukaan ka callback address alag hai (`/t/<shop>/api/...`), isliye Google Cloud me
+  OAuth redirect URI har dukaan ke liye jodna padta hai — abhi Drive backup sirf un dukaanon ke liye on karo
+  jinka URI joda ho. Local backup / restore sab ke liye chalta hai.
+* `SAAS_MASTER_KEY` badla to sab dukaanon ke login token aur saved secrets bekaar ho jaate hain.
+* Email set nahi hai to login details sirf screen par dikhte hain (admin console me *email_skipped* aata hai).
+
+---
 
 ## Problem aaye to
 

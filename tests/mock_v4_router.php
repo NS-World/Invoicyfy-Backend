@@ -14,6 +14,13 @@ if ($path === '/sms') {
     echo '{"ok":true}';
     return;
 }
+// Razorpay orders API (SaaS payment tests): needs the test key, returns an order id.
+if ($path === '/razorpay/v1/orders' && $m === 'POST') {
+    if (($_SERVER['PHP_AUTH_USER'] ?? '') !== 'rzp_test_key' || ($_SERVER['PHP_AUTH_PW'] ?? '') !== 'rzp_test_secret') { http_response_code(401); echo '{"error":{"description":"auth"}}'; return; }
+    $b = json_decode(file_get_contents('php://input'), true) ?: [];
+    if (empty($b['amount']) || ($b['currency'] ?? '') !== 'INR') { http_response_code(400); echo '{"error":{"description":"bad order"}}'; return; }
+    echo json_encode(['id' => 'order_' . bin2hex(random_bytes(7)), 'amount' => $b['amount'], 'currency' => 'INR', 'status' => 'created']); return;
+}
 if ($path === '/state') { echo json_encode($st); return; }
 if ($path === '/token') {
     parse_str($body, $p);

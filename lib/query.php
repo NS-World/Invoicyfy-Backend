@@ -226,7 +226,7 @@ function search_match_estimate(string $search, string $table, array $spec, int $
  */
 function cached(string $key, int $ttl, callable $compute)
 {
-    $dir = __DIR__ . '/../storage/cache';
+    $dir = env('STORAGE_DIR', __DIR__ . '/../storage') . '/cache';
     $file = $dir . '/' . preg_replace('/[^a-z0-9_.-]/i', '_', $key) . '.json';
     if (is_file($file) && filemtime($file) > time() - $ttl) {
         $v = json_decode((string) @file_get_contents($file), true);

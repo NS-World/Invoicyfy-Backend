@@ -10,6 +10,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/env.php';
+require_once __DIR__ . '/tenant.php'; // SaaS: picks the shop's database (does nothing unless SAAS_MODE=true)
 require_once __DIR__ . '/../config/cors.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 

@@ -13,7 +13,7 @@ if (!defined('INVOICYFY_CORS_SENT')) {
         header('Access-Control-Allow-Credentials: true');
     }
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Tenant');
     header('Access-Control-Max-Age: 86400');
 
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
